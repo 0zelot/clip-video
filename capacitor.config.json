@@ -1,0 +1,12 @@
+{
+  "appId": "app.clip.editor",
+  "appName": "Clip",
+  "webDir": ".output/public",
+  "android": {
+    "webContentsDebuggingEnabled": true,
+    "allowMixedContent": false
+  },
+  "server": {
+    "androidScheme": "https"
+  }
+}

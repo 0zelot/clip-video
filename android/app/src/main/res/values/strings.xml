@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Clip</string>
+    <string name="title_activity_main">Clip</string>
+    <string name="package_name">app.clip.editor</string>
+    <string name="custom_url_scheme">app.clip.editor</string>
+</resources>

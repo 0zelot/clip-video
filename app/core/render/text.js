@@ -1,0 +1,319 @@
+/**
+ * Text and caption renderer.
+ *
+ * Draws text items and TikTok/Shorts style captions (with per-word
+ * highlighting) onto any 2D context. Everything is expressed in canvas pixels
+ * derived from normalized style values, so the same code produces identical
+ * results in the preview and in a 4K export.
+ */
+import { fontStack } from '../model/defaults'
+
+const EASE_OUT = (p) => 1 - Math.pow(1 - p, 3)
+const EASE_OUT_BACK = (p) => 1 + 2.2 * Math.pow(p - 1, 3) + 1.2 * Math.pow(p - 1, 2)
+
+function clamp01(v) {
+  return Math.min(1, Math.max(0, v))
+}
+
+/** Converts a hex/named colour and an opacity into a canvas fill style. */
+function withAlpha(color, opacity) {
+  if (opacity >= 1) return color
+  const hex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(color ?? '')
+  if (hex) {
+    const raw = hex[1].length === 3 ? hex[1].split('').map((c) => c + c).join('') : hex[1]
+    const r = parseInt(raw.slice(0, 2), 16)
+    const g = parseInt(raw.slice(2, 4), 16)
+    const b = parseInt(raw.slice(4, 6), 16)
+    return `rgba(${r}, ${g}, ${b}, ${clamp01(opacity)})`
+  }
+  return color
+}
+
+/** Style values resolved to canvas pixels. */
+export function resolveStyle(style, canvasW, canvasH) {
+  const fontSize = Math.max(6, style.fontSize * canvasH)
+  return {
+    fontSize,
+    font: `${style.italic ? 'italic ' : ''}${style.fontWeight} ${fontSize}px ${fontStack(style.fontFamily)}`,
+    lineHeight: fontSize * style.lineHeight,
+    letterSpacing: style.letterSpacing * fontSize,
+    maxWidth: Math.max(fontSize, style.maxWidth * canvasW),
+    strokeWidth: style.stroke.width * fontSize,
+    padding: style.background.padding * fontSize,
+    radius: style.background.radius * fontSize,
+    shadowBlur: style.shadow.blur * fontSize,
+    shadowOffsetX: style.shadow.offsetX * fontSize,
+    shadowOffsetY: style.shadow.offsetY * fontSize,
+  }
+}
+
+function applyFont(ctx, resolved) {
+  ctx.font = resolved.font
+  if ('letterSpacing' in ctx) ctx.letterSpacing = `${resolved.letterSpacing}px`
+  ctx.textAlign = 'left'
+  ctx.textBaseline = 'alphabetic'
+}
+
+/**
+ * Splits the item into tokens. Captions keep their per-word timings so the
+ * active word can be highlighted.
+ * @returns {{ text: string, start?: number, end?: number }[]}
+ */
+function tokensOf(item) {
+  if (item.type === 'caption' && item.words.length > 0) return item.words
+  return item.text.split(/\s+/).filter(Boolean).map((text) => ({ text }))
+}
+
+/**
+ * Lays the text out into lines of positioned words.
+ *
+ * @returns {{ lines: { words: { token: object, text: string, x: number, width: number, index: number }[], width: number }[],
+ *   width: number, height: number, resolved: object }}
+ */
+export function layoutText(ctx, item, canvasW, canvasH) {
+  const style = item.style
+  const resolved = resolveStyle(style, canvasW, canvasH)
+  applyFont(ctx, resolved)
+
+  const spaceWidth = ctx.measureText(' ').width
+  const lines = []
+  let current = { words: [], width: 0 }
+  let index = 0
+
+  for (const token of tokensOf(item)) {
+    const text = style.uppercase ? token.text.toUpperCase() : token.text
+    const width = ctx.measureText(text).width
+    const addedWidth = current.words.length === 0 ? width : current.width + spaceWidth + width
+    if (current.words.length > 0 && addedWidth > resolved.maxWidth) {
+      lines.push(current)
+      current = { words: [], width: 0 }
+    }
+    const x = current.words.length === 0 ? 0 : current.width + spaceWidth
+    current.words.push({ token, text, x, width, index })
+    current.width = x + width
+    index++
+  }
+  if (current.words.length > 0) lines.push(current)
+
+  const width = lines.reduce((max, line) => Math.max(max, line.width), 0)
+  const height = lines.length * resolved.lineHeight
+  return { lines, width, height, resolved }
+}
+
+/** Index of the word being spoken at `localTime`, or -1. */
+export function activeWordIndex(item, localTime) {
+  if (item.type !== 'caption') return -1
+  for (let i = 0; i < item.words.length; i++) {
+    const w = item.words[i]
+    if (localTime >= w.start && localTime < w.end) return i
+  }
+  // Between words: keep the previous one highlighted so nothing flickers.
+  let last = -1
+  for (let i = 0; i < item.words.length; i++) if (item.words[i].start <= localTime) last = i
+  return last
+}
+
+/**
+ * Enter/exit animation state at a given item-local time.
+ * @returns {{ alpha: number, scale: number, offsetX: number, offsetY: number, reveal: number }}
+ */
+export function animationState(item, localTime, canvasH) {
+  const state = { alpha: 1, scale: 1, offsetX: 0, offsetY: 0, reveal: 1 }
+  const apply = (step, progress, direction) => {
+    if (!step || step.kind === 'none' || step.duration <= 0) return
+    const p = clamp01(progress)
+    switch (step.kind) {
+      case 'fade':
+        state.alpha *= p
+        break
+      case 'pop':
+        state.alpha *= clamp01(p * 1.8)
+        state.scale *= 0.7 + 0.3 * EASE_OUT_BACK(p)
+        break
+      case 'zoom':
+        state.alpha *= clamp01(p * 1.5)
+        state.scale *= 1.8 - 0.8 * EASE_OUT(p)
+        break
+      case 'slide':
+        state.alpha *= clamp01(p * 1.6)
+        state.offsetY += direction * (1 - EASE_OUT(p)) * canvasH * 0.08
+        break
+      case 'bounce': {
+        state.alpha *= clamp01(p * 2)
+        const damped = Math.exp(-4 * p) * Math.cos(10 * p)
+        state.scale *= 1 + (p >= 1 ? 0 : damped * 0.25)
+        break
+      }
+      case 'typewriter':
+        state.reveal = Math.min(state.reveal, p)
+        break
+      default:
+        break
+    }
+  }
+
+  const { in: enter, out: exit } = item.animation ?? {}
+  if (enter && localTime < enter.duration) apply(enter, localTime / enter.duration, 1)
+  const outStart = item.duration - (exit?.duration ?? 0)
+  if (exit && exit.duration > 0 && localTime > outStart) apply(exit, (item.duration - localTime) / exit.duration, -1)
+  return state
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  const radius = Math.min(r, w / 2, h / 2)
+  ctx.beginPath()
+  ctx.moveTo(x + radius, y)
+  ctx.arcTo(x + w, y, x + w, y + h, radius)
+  ctx.arcTo(x + w, y + h, x, y + h, radius)
+  ctx.arcTo(x, y + h, x, y, radius)
+  ctx.arcTo(x, y, x + w, y, radius)
+  ctx.closePath()
+}
+
+/**
+ * Draws a text or caption item.
+ *
+ * @param {CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D} ctx
+ * @param {import('../model/types').TextItem | import('../model/types').CaptionItem} item
+ * @param {{ width: number, height: number }} canvas project canvas size
+ * @param {number} localTime seconds since the item started
+ */
+export function drawTextItem(ctx, item, canvas, localTime) {
+  const style = item.style
+  const layout = layoutText(ctx, item, canvas.width, canvas.height)
+  const { resolved, lines } = layout
+  if (lines.length === 0) return
+
+  const anim = animationState(item, localTime, canvas.height)
+  const active = activeWordIndex(item, localTime)
+  const totalChars = lines.reduce((n, line) => n + line.words.reduce((m, w) => m + w.text.length + 1, 0), 0)
+  const revealChars = Math.ceil(totalChars * anim.reveal)
+
+  const cx = item.transform.x * canvas.width
+  const cy = item.transform.y * canvas.height
+
+  ctx.save()
+  ctx.globalAlpha = clamp01(item.opacity * style.opacity * anim.alpha)
+  ctx.translate(cx + anim.offsetX, cy + anim.offsetY)
+  if (item.transform.rotation) ctx.rotate((item.transform.rotation * Math.PI) / 180)
+  const scale = anim.scale * item.transform.scale
+  if (scale !== 1) ctx.scale(scale, scale)
+  applyFont(ctx, resolved)
+
+  const blockTop = -layout.height / 2
+  let charsDrawn = 0
+
+  lines.forEach((line, lineIndex) => {
+    const lineLeft = style.align === 'left' ? -layout.width / 2 : style.align === 'right' ? layout.width / 2 - line.width : -line.width / 2
+    const baseline = blockTop + lineIndex * resolved.lineHeight + resolved.lineHeight * 0.78
+
+    // background box behind the whole line
+    if (style.background.opacity > 0) {
+      ctx.save()
+      ctx.fillStyle = withAlpha(style.background.color, style.background.opacity)
+      roundRect(
+        ctx,
+        lineLeft - resolved.padding,
+        blockTop + lineIndex * resolved.lineHeight + resolved.lineHeight * 0.08,
+        line.width + resolved.padding * 2,
+        resolved.lineHeight * 0.96,
+        resolved.radius,
+      )
+      ctx.fill()
+      ctx.restore()
+    }
+
+    for (const word of line.words) {
+      const isActive = item.type === 'caption' && word.index === active && style.highlight && style.highlight !== 'none'
+      let text = word.text
+      if (anim.reveal < 1) {
+        const remaining = revealChars - charsDrawn
+        if (remaining <= 0) {
+          charsDrawn += text.length + 1
+          continue
+        }
+        if (remaining < text.length) text = text.slice(0, remaining)
+      }
+      charsDrawn += word.text.length + 1
+
+      ctx.save()
+      let wordScale = 1
+      let wordOffsetY = 0
+      if (isActive) {
+        const w = item.words[word.index]
+        const progress = w && w.end > w.start ? clamp01((localTime - w.start) / Math.min(0.18, w.end - w.start)) : 1
+        if (style.highlight === 'scale') wordScale = style.activeScale
+        if (style.highlight === 'pop') wordScale = 1 + (style.activeScale - 1) * EASE_OUT_BACK(progress)
+        if (style.highlight === 'bounce') {
+          wordScale = 1 + (style.activeScale - 1) * Math.exp(-5 * progress) * Math.cos(9 * progress)
+          wordOffsetY = -resolved.fontSize * 0.08 * Math.exp(-5 * progress) * Math.cos(9 * progress)
+        }
+      }
+
+      const wordCenterX = lineLeft + word.x + word.width / 2
+      ctx.translate(wordCenterX, baseline + wordOffsetY)
+      if (wordScale !== 1) ctx.scale(wordScale, wordScale)
+      const drawX = -word.width / 2
+
+      // highlight box behind the active word
+      if (isActive && style.highlight === 'box') {
+        ctx.save()
+        ctx.fillStyle = withAlpha(style.activeBackground, 1)
+        roundRect(
+          ctx,
+          drawX - resolved.padding * 0.5,
+          -resolved.fontSize * 0.85,
+          word.width + resolved.padding,
+          resolved.fontSize * 1.16,
+          resolved.radius * 0.7,
+        )
+        ctx.fill()
+        ctx.restore()
+      }
+
+      // stroke first, so the fill stays crisp
+      if (resolved.strokeWidth > 0) {
+        ctx.save()
+        ctx.lineJoin = 'round'
+        ctx.miterLimit = 2
+        ctx.lineWidth = resolved.strokeWidth * 2
+        ctx.strokeStyle = style.stroke.color
+        ctx.strokeText(text, drawX, 0)
+        ctx.restore()
+      }
+
+      if (style.shadow.opacity > 0 && (resolved.shadowBlur > 0 || resolved.shadowOffsetX || resolved.shadowOffsetY)) {
+        ctx.shadowColor = withAlpha(style.shadow.color, style.shadow.opacity)
+        ctx.shadowBlur = resolved.shadowBlur
+        ctx.shadowOffsetX = resolved.shadowOffsetX
+        ctx.shadowOffsetY = resolved.shadowOffsetY
+      }
+      ctx.fillStyle = isActive && (style.highlight === 'color' || style.highlight === 'pop' || style.highlight === 'bounce' || style.highlight === 'scale')
+        ? style.activeColor
+        : isActive && style.highlight === 'box'
+          ? style.color
+          : style.color
+      ctx.fillText(text, drawX, 0)
+      ctx.restore()
+    }
+  })
+
+  ctx.restore()
+}
+
+/**
+ * Bounding box of a text item in canvas pixels - used by the preview overlay
+ * for selection handles and hit testing.
+ */
+export function measureTextItem(ctx, item, canvas) {
+  const layout = layoutText(ctx, item, canvas.width, canvas.height)
+  const scale = item.transform.scale
+  const width = (layout.width + layout.resolved.padding * 2) * scale
+  const height = layout.height * scale
+  return {
+    width,
+    height,
+    cx: item.transform.x * canvas.width,
+    cy: item.transform.y * canvas.height,
+  }
+}
