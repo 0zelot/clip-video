@@ -270,6 +270,28 @@ export async function runExportPipeline(job, hooks) {
       }
     }
 
+    // Phone cameras store portrait video sideways plus a rotation flag, and the
+    // raw VideoFrame is *not* rotated. Such samples are first drawn upright into
+    // a scratch canvas (one per clip, reused); everything else stays zero-copy.
+    const uprightCanvases = new Map()
+    const toFrameImage = (sample, key) => {
+      if (sample.rotation === 0 && !sample.flip) {
+        const image = sample.toCanvasImageSource()
+        return { image, width: image.displayWidth ?? image.width, height: image.displayHeight ?? image.height }
+      }
+      const w = sample.displayWidth
+      const h = sample.displayHeight
+      let scratch = uprightCanvases.get(key)
+      if (!scratch || scratch.width !== w || scratch.height !== h) {
+        scratch = hooks.createCanvas(w, h)
+        uprightCanvases.set(key, scratch)
+      }
+      const scratchCtx = scratch.getContext('2d')
+      scratchCtx.clearRect(0, 0, w, h)
+      sample.drawWithFit(scratchCtx, { fit: 'fill' })
+      return { image: scratch, width: w, height: h }
+    }
+
     // Decoded samples are converted to drawable images only at draw time: the
     // VideoFrame returned by `toCanvasImageSource` may be closed after a microtask.
     const frames = new Map()
@@ -278,13 +300,25 @@ export async function runExportPipeline(job, hooks) {
         const frame = frames.get(item.id)
         if (!frame) return 'missing'
         if (frame === 'missing') return frame
-        if ('toCanvasImageSource' in frame) {
-          return { image: frame.toCanvasImageSource(), width: frame.displayWidth, height: frame.displayHeight }
-        }
+        if ('toCanvasImageSource' in frame) return toFrameImage(frame, item.id)
         return frame
       },
     }
     const activeReaders = new Set()
+
+    /** Decodes the frame a media layer needs at this moment. */
+    const loadLayerFrame = async (item, sourceTime, needed) => {
+      if (frames.has(item.id)) return
+      if (item.type === 'image') {
+        const bitmap = await getImage(item.assetId)
+        frames.set(item.id, bitmap ? { image: bitmap, width: bitmap.width, height: bitmap.height } : 'missing')
+      } else if (item.type === 'video') {
+        needed.add(item.id)
+        const reader = await getReader(item.assetId, item.id)
+        const sample = reader ? await reader.frameAt(sourceTime) : null
+        frames.set(item.id, sample ?? 'missing')
+      }
+    }
 
     for (let i = 0; i < totalFrames; i++) {
       if (hooks.isCancelled()) {
@@ -297,21 +331,10 @@ export async function runExportPipeline(job, hooks) {
       const needed = new Set()
 
       // Background blur needs the bottom layer as well; it is part of `layers`.
+      // During a transition the outgoing clip must be decoded too.
       for (const layer of layers) {
-        const { item } = layer
-        if (item.type === 'image') {
-          const bitmap = await getImage(item.assetId)
-          frames.set(item.id, bitmap ? { image: bitmap, width: bitmap.width, height: bitmap.height } : 'missing')
-        } else {
-          needed.add(item.id)
-          const reader = await getReader(item.assetId, item.id)
-          const sample = reader ? await reader.frameAt(layer.sourceTime) : null
-          if (sample) {
-            frames.set(item.id, sample)
-          } else {
-            frames.set(item.id, 'missing')
-          }
-        }
+        await loadLayerFrame(layer.item, layer.sourceTime, needed)
+        if (layer.transition) await loadLayerFrame(layer.transition.previous.item, layer.transition.previous.sourceTime, needed)
       }
 
       renderFrame(ctx, project, t, provider, { scale })

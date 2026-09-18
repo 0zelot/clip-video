@@ -14,12 +14,18 @@ const projectStore = useProjectStore()
 const editor = useEditorStore()
 const ui = useUiStore()
 
+/**
+ * Video bitrate for a 1080p (1920x1080 or 1080x1920) export at 30 fps, in Mb/s.
+ * In line with what TikTok, Shorts and YouTube recommend for uploads - they
+ * re-encode everything anyway, so going higher only makes files bigger.
+ */
 const QUALITY_PRESETS = [
-  { id: 'low', label: 'Low', mbpsPerMegapixel: 2.5 },
-  { id: 'medium', label: 'Medium', mbpsPerMegapixel: 5 },
-  { id: 'high', label: 'High', mbpsPerMegapixel: 9 },
-  { id: 'custom', label: 'Custom', mbpsPerMegapixel: 0 },
+  { id: 'low', label: 'Low', mbpsAt1080p: 3 },
+  { id: 'medium', label: 'Medium', mbpsAt1080p: 6 },
+  { id: 'high', label: 'High', mbpsAt1080p: 10 },
+  { id: 'custom', label: 'Custom', mbpsAt1080p: 0 },
 ]
+const PIXELS_1080P = 1920 * 1080
 
 const container = ref('mp4')
 const resolutionScale = ref(1)
@@ -62,9 +68,11 @@ const output = computed(() => {
 const videoBitrate = computed(() => {
   if (quality.value === 'custom') return Math.round(customMbps.value * 1_000_000)
   const preset = QUALITY_PRESETS.find((p) => p.id === quality.value)
-  const megapixels = (output.value.width * output.value.height) / 1_000_000
-  const fpsFactor = fps.value / 30
-  return Math.round(Math.max(1, megapixels) * preset.mbpsPerMegapixel * fpsFactor * 1_000_000)
+  // Smaller frames need proportionally less data, but never starve 480p.
+  const sizeFactor = Math.max(0.3, (output.value.width * output.value.height) / PIXELS_1080P)
+  // Doubling the frame rate costs far less than double the bitrate: 60 fps = 1.5x.
+  const fpsFactor = fps.value <= 30 ? 1 : 1 + (0.5 * (fps.value - 30)) / 30
+  return Math.round(preset.mbpsAt1080p * sizeFactor * fpsFactor * 1_000_000)
 })
 
 const estimatedSize = computed(() => {
