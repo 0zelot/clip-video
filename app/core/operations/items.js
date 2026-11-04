@@ -534,3 +534,66 @@ export function hasPreviousNeighbour(project, itemId) {
   const prev = loc.track.items[loc.itemIndex - 1]
   return !!prev && Math.abs(itemEnd(prev) - loc.item.start) < 0.05
 }
+
+/**
+ * Sets the same transition on every clip of the item's track that directly
+ * follows another clip (or clears them all for `kind: 'none'`).
+ * @returns {number} number of cuts changed
+ */
+export function applyTransitionToTrack(project, itemId, transition) {
+  const loc = locateItem(project, itemId)
+  if (!loc || loc.track.locked) return 0
+  let count = 0
+  for (const item of loc.track.items) {
+    if (!hasPreviousNeighbour(project, item.id)) continue
+    if (setTransition(project, item.id, transition)) count++
+  }
+  return count
+}
+
+/**
+ * Removes parts of one clip (e.g. silences) and closes the gaps on its track.
+ * Other tracks are not touched.
+ *
+ * @param {import('../model/types').Project} project
+ * @param {string} itemId
+ * @param {[number, number][]} ranges timeline ranges inside the clip
+ * @returns {{ removed: number, seconds: number }}
+ */
+export function cutRangesFromItem(project, itemId, ranges) {
+  const loc = locateItem(project, itemId)
+  if (!loc || loc.track.locked) return { removed: 0, seconds: 0 }
+  const track = loc.track
+  let removed = 0
+  let seconds = 0
+  // Back to front: the original item always remains the left-most piece.
+  const sorted = [...ranges].filter(([a, b]) => b - a > MIN_ITEM_DURATION).sort((x, y) => y[0] - x[0])
+  for (const [rawFrom, rawTo] of sorted) {
+    const item = track.items.find((i) => i.id === itemId)
+    if (!item) break
+    const from = Math.max(item.start, rawFrom)
+    const to = Math.min(itemEnd(item), rawTo)
+    if (to - from < MIN_ITEM_DURATION) continue
+
+    if (itemEnd(item) - to >= MIN_ITEM_DURATION) {
+      const rightId = splitItem(project, item.id, to)
+      const right = rightId ? track.items.find((i) => i.id === rightId) : null
+      if (right) delete right.transitionIn
+    }
+    let middle = track.items.find((i) => i.id === itemId)
+    if (!middle) break
+    if (from - middle.start >= MIN_ITEM_DURATION) {
+      const middleId = splitItem(project, middle.id, from)
+      middle = middleId ? track.items.find((i) => i.id === middleId) : null
+      if (!middle) continue
+    }
+    const gap = middle.duration
+    const gapStart = middle.start
+    track.items = track.items.filter((i) => i.id !== middle.id)
+    for (const other of track.items) if (other.start >= gapStart - EPSILON) other.start -= gap
+    sortTrack(track)
+    removed++
+    seconds += gap
+  }
+  return { removed, seconds }
+}

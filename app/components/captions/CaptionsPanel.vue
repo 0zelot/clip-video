@@ -1,4 +1,5 @@
 <script setup>
+import { textPreviewStyle } from '~/composables/useTextPreview'
 import { ClipboardType, FileUp, Merge, Mic, Scissors, Trash2, Wand2 } from 'lucide-vue-next'
 import { formatTimecode } from '~/core/time'
 import { useCaptionsStore } from '~/stores/captions'
@@ -88,15 +89,18 @@ async function clearAll() {
 
       <div>
         <span class="label">Style</span>
-        <div class="grid grid-cols-3 gap-1">
+        <div class="grid grid-cols-3 gap-1.5">
           <button
             v-for="preset in captions.presets"
             :key="preset.id"
             type="button"
-            class="h-8 rounded-lg border border-line px-1 text-[10px] text-muted hover:border-accent hover:text-accent coarse:h-10"
+            class="flex flex-col items-center gap-1 rounded-lg border border-line bg-[#2a2a36] p-1 text-[10px] text-muted hover:border-accent hover:text-accent"
             @click="captions.applyPreset(preset)"
           >
-            {{ preset.label }}
+            <span class="grid h-8 w-full place-items-center overflow-hidden rounded-md text-xs uppercase" :style="textPreviewStyle(preset.style)">
+              <span>Hey <span :style="{ color: preset.style.highlight === 'box' ? preset.style.color : preset.style.activeColor, background: preset.style.highlight === 'box' ? preset.style.activeBackground : undefined, WebkitTextFillColor: preset.style.highlight === 'box' ? undefined : preset.style.activeColor }">you</span></span>
+            </span>
+            <span class="w-full truncate text-center">{{ preset.label }}</span>
           </button>
         </div>
       </div>

@@ -1,5 +1,6 @@
 <script setup>
 import { FORMAT_PRESETS, FPS_OPTIONS } from '~/core/model/defaults'
+import { defaultProjectName } from '~/core/naming'
 
 const props = defineProps({
   open: Boolean,
@@ -13,13 +14,16 @@ const presetId = ref('9:16')
 const width = ref(1080)
 const height = ref(1920)
 const fps = ref(30)
+/** The generated name follows the chosen format until the user types one. */
+const nameEdited = ref(false)
 
 watch(
   () => props.open,
   (open) => {
     if (!open) return
     const first = props.files?.[0]?.name.replace(/\.[^.]+$/, '')
-    name.value = first || `Project ${new Date().toLocaleDateString()}`
+    nameEdited.value = false
+    name.value = first || defaultProjectName({ width: width.value, height: height.value })
   },
 )
 
@@ -30,6 +34,7 @@ function choose(id) {
     width.value = preset.width
     height.value = preset.height
   }
+  if (!nameEdited.value && !props.files?.length) name.value = defaultProjectName({ width: width.value, height: height.value })
 }
 
 function submit() {
@@ -50,12 +55,13 @@ function submit() {
       </p>
       <div>
         <label class="label" for="project-name">Name</label>
-        <input id="project-name" v-model="name" class="field" maxlength="120" />
+        <input id="project-name" v-model="name" class="field" maxlength="120" @input="nameEdited = true" />
+        <p class="mt-1 text-[11px] text-muted">If another project already has this name, a number is added automatically.</p>
       </div>
 
       <div>
         <span class="label">Format</span>
-        <div class="grid grid-cols-2 gap-2 sm:grid-cols-5">
+        <div class="grid grid-cols-3 gap-2 sm:grid-cols-5">
           <button
             v-for="preset in FORMAT_PRESETS"
             :key="preset.id"

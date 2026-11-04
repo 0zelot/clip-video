@@ -59,7 +59,9 @@ const icon = computed(() => ICONS[props.item.type] ?? Video)
 const label = computed(() =>
   props.item.type === 'text' || props.item.type === 'caption' ? props.item.text || 'Text' : (props.item.name ?? asset.value?.name ?? 'Clip'),
 )
-const speedBadge = computed(() => (props.item.speed && Math.abs(props.item.speed - 1) > 0.001 ? `${props.item.speed}×` : null))
+const speedBadge = computed(() =>
+  props.item.speed && Math.abs(props.item.speed - 1) > 0.001 ? `${Number(props.item.speed.toFixed(2))}×` : null,
+)
 
 const showWaveform = computed(
   () => props.item.type === 'audio' || (props.item.type === 'video' && asset.value?.hasAudio && props.height >= 60),

@@ -165,6 +165,7 @@ const handles = [
   <div ref="root" class="pointer-events-none absolute">
     <div
       v-if="visible && box"
+      data-preview-handle
       class="pointer-events-auto absolute touch-none"
       :style="{
         left: `${box.left}px`,

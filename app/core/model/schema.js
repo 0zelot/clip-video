@@ -31,6 +31,11 @@ function normalizeTransition(raw) {
   }
 }
 
+function normalizeMotion(raw) {
+  if (!raw || typeof raw !== 'object' || typeof raw.kind !== 'string' || raw.kind === 'none') return undefined
+  return { kind: raw.kind, amount: Math.min(1, Math.max(0, num(raw.amount, 0.5))) }
+}
+
 function normalizeTextStyle(raw, base) {
   const style = { ...base, ...(raw ?? {}) }
   style.stroke = { ...base.stroke, ...(raw?.stroke ?? {}) }
@@ -60,6 +65,7 @@ function normalizeItem(raw) {
     effects: { ...neutralEffects(), ...(raw.effects ?? {}) },
     ...(normalizeTransition(raw.transitionIn) ? { transitionIn: normalizeTransition(raw.transitionIn) } : {}),
     ...(raw.keyframes ? { keyframes: raw.keyframes } : {}),
+    ...(normalizeMotion(raw.motion) ? { motion: normalizeMotion(raw.motion) } : {}),
   }
   const timed = {
     sourceIn: Math.max(0, num(raw.sourceIn, 0)),

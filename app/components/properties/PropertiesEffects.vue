@@ -1,6 +1,7 @@
 <script setup>
 import { Sparkles } from 'lucide-vue-next'
 import { FILTER_PRESETS, applyFilterPreset, neutralEffects } from '~/core/model/defaults'
+import { buildFilter } from '~/core/render/layout'
 import { useEditorStore } from '~/stores/editor'
 import { useProjectStore } from '~/stores/project'
 import { useUiStore } from '~/stores/ui'
@@ -24,9 +25,17 @@ const activePreset = computed(() => {
   const current = effects.value
   return FILTER_PRESETS.find((preset) => {
     const target = applyFilterPreset(preset.id)
-    return Object.keys(target).every((k) => Math.abs(target[k] - current[k]) < 0.001)
+    return Object.keys(target).every((k) => Math.abs(target[k] - (current[k] ?? 0)) < 0.001)
   })?.id
 })
+
+/** CSS approximation of a filter for its thumbnail. */
+function previewFilter(preset) {
+  const fx = applyFilterPreset(preset.id)
+  const css = buildFilter(fx)
+  const warm = fx.temperature > 0 ? ` sepia(${fx.temperature * 0.5})` : fx.temperature < 0 ? ` hue-rotate(${fx.temperature * -25}deg)` : ''
+  return (css === 'none' ? '' : css) + warm || 'none'
+}
 
 const hasRange = computed(() => editor.markIn !== null && editor.markOut !== null && editor.markOut > editor.markIn)
 
@@ -63,9 +72,12 @@ const sliders = [
   { key: 'sepia', label: 'Sepia', min: 0, max: 1, step: 0.01, neutral: 0, percent: true },
   { key: 'invert', label: 'Invert', min: 0, max: 1, step: 0.01, neutral: 0, percent: true },
   { key: 'vignette', label: 'Vignette', min: 0, max: 1, step: 0.01, neutral: 0, percent: true },
+  { key: 'temperature', label: 'Temperature', min: -1, max: 1, step: 0.01, neutral: 0, signed: true },
+  { key: 'grain', label: 'Film grain', min: 0, max: 1, step: 0.01, neutral: 0, percent: true },
 ]
 
 function formatValue(slider, value) {
+  if (slider.signed) return `${value > 0 ? '+' : ''}${Math.round(value * 100)}`
   if (slider.percent) return `${Math.round(value * 100)}%`
   if (slider.unit) return `${Math.round(value)}${slider.unit}`
   return `${Math.round(value * 100)}%`
@@ -74,23 +86,25 @@ function formatValue(slider, value) {
 
 <template>
   <PropertiesSection title="Effects & filters" :icon="Sparkles">
-    <div class="grid grid-cols-4 gap-1">
+    <span class="label">Filters</span>
+    <div class="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1">
       <button
         v-for="preset in FILTER_PRESETS"
         :key="preset.id"
         type="button"
-        class="h-8 rounded-lg border px-1 text-[10px] font-medium coarse:h-10"
+        class="flex w-16 shrink-0 flex-col items-center gap-1 rounded-lg border p-1 text-[10px] font-medium"
         :class="activePreset === preset.id ? 'border-accent bg-accent/10 text-accent' : 'border-line text-muted hover:border-subtle'"
         @click="usePreset(preset)"
       >
-        {{ preset.label }}
+        <span class="block h-9 w-full rounded-md bg-gradient-to-br from-[#e9a46a] via-[#5f8fb4] to-[#2b3a4f]" :style="{ filter: previewFilter(preset) }" />
+        <span class="w-full truncate text-center">{{ preset.label }}</span>
       </button>
     </div>
 
     <UiSlider
       v-for="slider in sliders"
       :key="slider.key"
-      :model-value="effects[slider.key]"
+      :model-value="effects[slider.key] ?? slider.neutral"
       :label="slider.label"
       :min="slider.min"
       :max="slider.max"

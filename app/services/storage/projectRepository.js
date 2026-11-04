@@ -1,6 +1,7 @@
 import { createId } from '../../core/model/defaults'
 import { referencedAssetIds } from '../../core/model/queries'
 import { normalizeProject } from '../../core/model/schema'
+import { uniqueName } from '../../core/naming'
 import { getDB } from './db'
 import { deleteBlobs } from './mediaRepository'
 
@@ -64,16 +65,40 @@ export const projectRepository = {
     await db.put('projects', toPlain(project))
   },
 
+  /**
+   * A name no other project uses (`excludeId` is the project being renamed).
+   * @returns {Promise<string>}
+   */
+  async uniqueName(name, excludeId) {
+    const db = await getDB()
+    const all = await db.getAll('projects')
+    return uniqueName(name, all.filter((p) => p.id !== excludeId).map((p) => p.name))
+  },
+
+  /**
+   * Stores a brand-new project under a unique name.
+   * @returns {Promise<import('../../core/model/types').Project>} the stored project
+   */
+  async create(project) {
+    const name = await this.uniqueName(project.name, project.id)
+    const stored = { ...project, name }
+    await this.save(stored)
+    return stored
+  },
+
+  /** @returns {Promise<string | null>} the name actually used */
   async rename(id, name) {
+    const unique = await this.uniqueName(name, id)
     const db = await getDB()
     const tx = db.transaction('projects', 'readwrite')
     const project = await tx.store.get(id)
     if (project) {
-      project.name = name
+      project.name = unique
       project.updatedAt = Date.now()
       await tx.store.put(project)
     }
     await tx.done
+    return project ? unique : null
   },
 
   /** Duplicates a project. Media blobs are shared by asset id and reference-counted on delete. */
@@ -82,10 +107,11 @@ export const projectRepository = {
     const source = await db.get('projects', id)
     if (!source) return null
     const now = Date.now()
+    const copyName = await this.uniqueName(name ?? `${source.name} (copy)`)
     const copy = {
       ...toPlain(normalizeProject(source)),
       id: createId(),
-      name: name ?? `${source.name} (copy)`,
+      name: copyName,
       createdAt: now,
       updatedAt: now,
     }

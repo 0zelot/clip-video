@@ -1,6 +1,7 @@
 <script setup>
-import { Plus, Type } from 'lucide-vue-next'
+import { Plus } from 'lucide-vue-next'
 import { DEFAULT_TEXT_DURATION, TEXT_PRESETS } from '~/core/model/defaults'
+import { textPreviewStyle } from '~/composables/useTextPreview'
 import { useEditorStore } from '~/stores/editor'
 import { useProjectStore } from '~/stores/project'
 
@@ -35,32 +36,23 @@ function addText(preset) {
 
     <div class="min-h-0 flex-1 space-y-2 overflow-y-auto px-3 pb-4">
       <p class="text-xs text-muted">Text is added at the playhead. Drag it straight on the preview to place it.</p>
-      <button
-        v-for="preset in presets"
-        :key="preset.id"
-        type="button"
-        class="flex w-full items-center gap-3 rounded-xl border border-line bg-panel-2 p-3 text-left transition-colors hover:border-accent"
-        @click="addText(preset)"
-      >
-        <span
-          class="grid size-10 shrink-0 place-items-center rounded-lg"
-          :style="{
-            background: preset.style.background.opacity > 0 ? preset.style.background.color : 'transparent',
-            color: preset.style.color,
-            fontWeight: preset.style.fontWeight,
-            border: preset.style.stroke.width > 0 ? `1px solid ${preset.style.stroke.color}` : '1px solid transparent',
-          }"
+      <div class="grid grid-cols-2 gap-2 sm:grid-cols-2">
+        <button
+          v-for="preset in presets"
+          :key="preset.id"
+          type="button"
+          class="flex flex-col gap-1.5 rounded-xl border border-line bg-panel-2 p-2 text-left transition-colors hover:border-accent"
+          @click="addText(preset)"
         >
-          Aa
-        </span>
-        <span class="min-w-0 flex-1">
-          <span class="block truncate text-sm font-medium">{{ preset.label }}</span>
-          <span class="block truncate text-[11px] text-muted">
-            {{ preset.animation.in.kind === 'none' ? 'no animation' : `${preset.animation.in.kind} in` }}
+          <span class="grid h-14 w-full place-items-center overflow-hidden rounded-lg bg-[#2a2a36] px-1 text-xl" :style="textPreviewStyle(preset.style)">
+            <span :style="preset.style.background.opacity > 0 ? { padding: '2px 8px', borderRadius: '6px' } : {}">{{ preset.style.uppercase ? 'TEXT' : 'Text' }}</span>
           </span>
-        </span>
-        <Type class="size-4 shrink-0 text-muted" />
-      </button>
+          <span class="flex items-center gap-1 px-0.5">
+            <span class="min-w-0 flex-1 truncate text-xs font-medium">{{ preset.label }}</span>
+            <span class="shrink-0 text-[10px] text-muted">{{ preset.animation.in.kind === 'none' ? '' : preset.animation.in.kind }}</span>
+          </span>
+        </button>
+      </div>
     </div>
   </div>
 </template>

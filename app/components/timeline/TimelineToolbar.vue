@@ -1,5 +1,5 @@
 <script setup>
-import { Captions, Copy, Magnet, Maximize, Scissors, SquareDashedBottom, Trash2, Type, ZoomIn, ZoomOut } from 'lucide-vue-next'
+import { Captions, Copy, Crosshair, Magnet, Maximize, Scissors, SquareDashedBottom, Trash2, Type, ZoomIn, ZoomOut } from 'lucide-vue-next'
 import { formatTimecode } from '~/core/time'
 import { useEditorStore } from '~/stores/editor'
 import { useProjectStore } from '~/stores/project'
@@ -64,6 +64,13 @@ const rangeLabel = computed(() => {
 
     <div class="flex-1" />
 
+    <UiIconButton
+      :icon="Crosshair"
+      label="Fixed centre playhead (scroll to scrub)"
+      size="sm"
+      :active="editor.centerPlayhead"
+      @click="editor.setCenterPlayhead(!editor.centerPlayhead)"
+    />
     <UiIconButton :icon="Magnet" label="Snapping (N)" size="sm" :active="editor.snapping" @click="editor.snapping = !editor.snapping" />
     <UiIconButton :icon="ZoomOut" label="Zoom out (−)" size="sm" @click="emit('zoom', 0.8)" />
     <UiIconButton :icon="ZoomIn" label="Zoom in (+)" size="sm" @click="emit('zoom', 1.25)" />

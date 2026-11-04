@@ -1,5 +1,5 @@
 <script setup>
-import { AudioLines, Captions, Clock, Copy, Image as ImageIcon, Scissors, Trash2, Type, Video } from 'lucide-vue-next'
+import { AudioLines, Captions, Clock, Copy, Image as ImageIcon, Scissors, Sparkles, Trash2, Type, Video } from 'lucide-vue-next'
 import { locateItem } from '~/core/model/queries'
 import { hasAudio, isTextual, isVisualItem } from '~/core/model/types'
 import { formatDuration, itemEnd, sourceOut } from '~/core/time'
@@ -30,6 +30,10 @@ const icon = computed(() =>
           : Video,
 )
 
+/** Mobile toolbar: only one section is shown in the bottom sheet. */
+const focus = computed(() => (editor.mobilePanel === 'properties' ? editor.propertiesFocus : null))
+const show = (section) => !focus.value || focus.value === section
+
 function setStart(value) {
   if (item.value) projectStore.setItemTiming(item.value.id, { start: value })
 }
@@ -45,7 +49,15 @@ function setSourceIn(value) {
   <div class="flex min-h-0 flex-1 flex-col" data-properties-panel>
     <div class="flex items-center justify-between px-3 py-2.5">
       <h2 class="panel-title">{{ item ? 'Clip' : editor.selection.length > 1 ? 'Selection' : 'Project' }}</h2>
-      <span v-if="location" class="text-[11px] text-muted">{{ location.track.name }}</span>
+      <button
+        v-if="focus && item"
+        type="button"
+        class="text-[11px] font-medium text-accent"
+        @click="editor.propertiesFocus = null"
+      >
+        All settings
+      </button>
+      <span v-if="location && !focus" class="text-[11px] text-muted">{{ location.track.name }}</span>
     </div>
 
     <div class="min-h-0 flex-1 overflow-y-auto px-3 pb-6">
@@ -60,6 +72,7 @@ function setSourceIn(value) {
 
       <!-- single clip -->
       <div v-else-if="item">
+        <template v-if="!focus">
         <div class="flex items-center gap-2 rounded-xl bg-panel-2 p-2.5">
           <component :is="icon" class="size-4 shrink-0 text-accent" />
           <p class="min-w-0 flex-1 truncate text-sm font-medium" :title="asset?.name">{{ item.name ?? asset?.name ?? item.type }}</p>
@@ -70,8 +83,9 @@ function setSourceIn(value) {
           <UiButton size="sm" :icon="Copy" @click="commands.duplicateSelection()">Copy</UiButton>
           <UiButton size="sm" variant="danger" :icon="Trash2" @click="commands.deleteSelection()">Delete</UiButton>
         </div>
+        </template>
 
-        <PropertiesSection title="Timing" :icon="Clock">
+        <PropertiesSection v-if="show('timing')" title="Timing" :icon="Clock">
           <div class="grid grid-cols-2 gap-2">
             <UiTimeField :model-value="item.start" label="Start" :fps="fps" @commit="setStart" />
             <UiTimeField :model-value="item.duration" label="Duration" :fps="fps" :min="1 / fps" @commit="setDuration" />
@@ -98,14 +112,18 @@ function setSourceIn(value) {
           </p>
         </PropertiesSection>
 
-        <PropertiesText v-if="isTextual(item)" :item="item" />
-        <PropertiesSpeed v-if="item.type === 'video' || item.type === 'audio'" :item="item" />
-        <PropertiesTransform v-if="isVisualItem(item)" :item="item" />
-        <PropertiesEffects v-if="item.type === 'video' || item.type === 'image'" :item="item" />
-        <PropertiesTransition v-if="item.type === 'video' || item.type === 'image'" :item="item" />
-        <PropertiesAudio v-if="hasAudio(item)" :item="item" />
+        <PropertiesText v-if="isTextual(item) && show('text')" :item="item" />
+        <PropertiesSpeed v-if="(item.type === 'video' || item.type === 'audio') && show('speed')" :item="item" />
+        <PropertiesTransform v-if="isVisualItem(item) && show('transform')" :item="item" />
+        <PropertiesEffects v-if="(item.type === 'video' || item.type === 'image') && show('effects')" :item="item" />
+        <PropertiesMotion v-if="(item.type === 'video' || item.type === 'image') && show('motion')" :item="item" />
+        <PropertiesTransition v-if="(item.type === 'video' || item.type === 'image') && show('transition')" :item="item" />
+        <PropertiesAudio v-if="hasAudio(item) && show('audio')" :item="item" />
+        <PropertiesSection v-if="item.type !== 'text' && item.type !== 'caption' && show('ai')" title="Smart tools (on-device AI)" :icon="Sparkles" :default-open="focus === 'ai'">
+          <AiTools :item="item" />
+        </PropertiesSection>
 
-        <PropertiesSection v-if="asset" title="Source" :default-open="false">
+        <PropertiesSection v-if="asset && !focus" title="Source" :default-open="false">
           <dl class="space-y-1 text-xs text-muted">
             <div class="flex justify-between gap-2">
               <dt>File</dt>

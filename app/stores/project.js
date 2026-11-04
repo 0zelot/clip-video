@@ -239,6 +239,13 @@ export const useProjectStore = defineStore('project', () => {
         return ids
       }) ?? [],
     setTransition: (itemId, transition) => mutate('Change transition', (p) => itemOps.setTransition(p, itemId, transition)),
+    applyTransitionToTrack: (itemId, transition) =>
+      mutate('Apply transition to all cuts', (p) => itemOps.applyTransitionToTrack(p, itemId, transition)) ?? 0,
+    cutRangesFromItem: (itemId, ranges, label = 'Remove silences') =>
+      mutate(label, (p) => itemOps.cutRangesFromItem(p, itemId, ranges)) ?? { removed: 0, seconds: 0 },
+    replaceAsset: (itemId, assetId, name) => mutate('Replace media', (p) => itemOps.updateItem(p, itemId, { assetId, name })),
+    setMotion: (itemId, motion) =>
+      mutate('Change motion', (p) => itemOps.updateItem(p, itemId, { motion }), { coalesceKey: `motion:${itemId}` }),
     setEffects: (itemId, effects, key) =>
       mutate('Change effects', (p) => itemOps.updateItem(p, itemId, { effects }), { coalesceKey: key ?? `effects:${itemId}` }),
     setTransform: (itemId, transform, key) =>

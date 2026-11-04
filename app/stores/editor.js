@@ -9,6 +9,19 @@ export const MIN_ZOOM = 2
 export const MAX_ZOOM = 600
 
 const TIMELINE_HEIGHT_KEY = 'clip:timeline-height'
+const CENTER_PLAYHEAD_KEY = 'clip:center-playhead'
+
+function readCenterPlayhead() {
+  try {
+    const v = localStorage.getItem(CENTER_PLAYHEAD_KEY)
+    if (v === 'on') return true
+    if (v === 'off') return false
+    // Default: CapCut-style fixed playhead on touch devices.
+    return typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches
+  } catch {
+    return false
+  }
+}
 
 function readNumber(key, fallback) {
   try {
@@ -30,10 +43,20 @@ export const useEditorStore = defineStore('editor', () => {
   const markOut = ref(null)
   const playing = ref(false)
   const timelineHeight = ref(readNumber(TIMELINE_HEIGHT_KEY, 300))
+  /** False until the user resized the timeline (phones then use a relative default). */
+  const timelineHeightSet = ref(readNumber(TIMELINE_HEIGHT_KEY, 0) > 0)
   /** @type {import('vue').Ref<MobilePanel>} */
   const mobilePanel = ref(null)
-  /** Active tab of the left sidebar: 'media' | 'text' | 'captions'. */
+  /** Active tab of the left sidebar: 'media' | 'text' | 'captions' | 'ai'. */
   const sidebarTab = ref('media')
+  /**
+   * On phones the bottom sheet can show just one section of the clip
+   * properties ('speed', 'effects', …); null shows all of them.
+   * @type {import('vue').Ref<string | null>}
+   */
+  const propertiesFocus = ref(null)
+  /** Timeline scrolls under a fixed, centred playhead (scrolling = scrubbing). */
+  const centerPlayhead = ref(readCenterPlayhead())
   const exportOpen = ref(false)
   /** @type {import('vue').ShallowRef<PlaybackEngine | null>} */
   const engine = shallowRef(null)
@@ -57,8 +80,21 @@ export const useEditorStore = defineStore('editor', () => {
     playing.value = false
   }
 
-  /** Brings the properties of the selected clip into view on any screen size. */
-  function focusProperties() {
+  function setCenterPlayhead(value) {
+    centerPlayhead.value = value
+    try {
+      localStorage.setItem(CENTER_PLAYHEAD_KEY, value ? 'on' : 'off')
+    } catch {
+      // optional
+    }
+  }
+
+  /**
+   * Brings the properties of the selected clip into view on any screen size.
+   * @param {string | null} [section] show only this section in the mobile sheet
+   */
+  function focusProperties(section = null) {
+    propertiesFocus.value = section
     mobilePanel.value = 'properties'
     if (typeof document === 'undefined') return
     requestAnimationFrame(() => {
@@ -73,6 +109,7 @@ export const useEditorStore = defineStore('editor', () => {
     markIn.value = null
     markOut.value = null
     mobilePanel.value = null
+    propertiesFocus.value = null
     exportOpen.value = false
   }
 
@@ -90,6 +127,7 @@ export const useEditorStore = defineStore('editor', () => {
 
   function setTimelineHeight(px) {
     timelineHeight.value = Math.round(px)
+    timelineHeightSet.value = true
     try {
       localStorage.setItem(TIMELINE_HEIGHT_KEY, String(timelineHeight.value))
     } catch {
@@ -110,8 +148,12 @@ export const useEditorStore = defineStore('editor', () => {
     markOut,
     playing,
     timelineHeight,
+    timelineHeightSet,
     mobilePanel,
     sidebarTab,
+    propertiesFocus,
+    centerPlayhead,
+    setCenterPlayhead,
     exportOpen,
     engine,
     focusProperties,

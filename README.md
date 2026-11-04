@@ -35,7 +35,8 @@ has loaded it keeps working with the internet switched off.
 - Multiple video and audio tracks with mute, hide, lock and layer reordering.
 
 **Speed**
-- Presets from 0.25× to 4× plus any custom value.
+- Any speed from 0.1× to 16× with 0.001 precision (e.g. 1.16×): log slider, presets, ±0.01/±0.1 nudges.
+- *Fit to duration*: type how long the clip should last and the speed is calculated for you.
 - Apply speed to a whole clip or only to the part between your In and Out marks.
 - Pitch is preserved, so sped-up speech does not turn into a chipmunk.
 
@@ -43,14 +44,23 @@ has loaded it keeps working with the internet switched off.
 - Add images at any point on the timeline, then drag, scale and rotate them directly on the preview.
 - Position, scale, rotation, opacity, flip, fit/fill and crop (with 9:16, 16:9, 1:1, 4:5 presets) for every visual clip.
 - Text clips with font, size, colour, opacity, bold/italic, alignment, line height, letter spacing, outline, shadow and a
-  background box - plus ready-made looks and in/out animations (fade, pop, slide, zoom, bounce, typewriter).
+  background box, gradient fill and hollow (outline-only) letters - plus 17 ready-made looks and in/out animations
+  (fade, pop, slide, rise, drop, zoom, blur, spin, bounce, wave, typewriter).
 - Import your own fonts (`.ttf`, `.otf`, `.woff2`); they are used in the preview and in the export.
 
 **Transitions and looks**
-- Transitions between neighbouring clips: cut, fade, crossfade, dip to black/white, slide, wipe and zoom, each with an
-  adjustable duration.
-- Filters (Natural, Warm, Cold, B&W, Vintage, Cinematic, High contrast, Dreamy) and manual controls for brightness,
-  contrast, saturation, hue, blur, grayscale, sepia, invert and vignette - for a whole clip or just a marked range.
+- 18 transitions between neighbouring clips: fade, crossfade, dip to black/white, slide, push, wipe, whip pan, zoom
+  in/out, blur, spin, flash, circle, doors, clock and glitch - with adjustable duration, preview and *Apply to all cuts*.
+- 19 filters (Vivid, Golden hour, Teal & orange, Moody, Noir, Film, Retro, …) and manual controls for brightness,
+  contrast, saturation, hue, temperature, blur, grayscale, sepia, invert, vignette and film grain - for a whole clip or
+  just a marked range.
+- Motion: Ken Burns zoom/pan, shake and pulse for photos and static shots.
+
+**Smart tools (on-device AI)**
+- Remove silences: jump-cuts pauses out of talking clips (adjustable threshold and minimum pause).
+- Auto enhance: corrects exposure, contrast and dull colours from the current frame.
+- Remove background from photos (MODNet, ~25 MB, downloaded once and cached; the image never leaves the device).
+- Auto captions with Whisper (see below).
 - Project background: solid colour, gradient or a blurred copy of the video (handy for landscape footage in a vertical
   frame).
 
@@ -59,6 +69,12 @@ has loaded it keeps working with the internet switched off.
 - Per clip: volume, mute, fade in/out, trim, split, loop, speed and pitch (±12 semitones).
 - Turn the volume down for just one part of a clip by marking a range and applying it there.
 - Waveforms on the timeline make it easy to line audio up with the picture.
+
+**Preview & phone editing**
+- Pinch or Ctrl+wheel to zoom the preview, drag to pan; drag sideways to scrub, double-tap the edges to jump ±5 s.
+- Scrub bar, ±5 s buttons and J/K/L keys; on phones the timeline scrolls under a fixed centre playhead.
+- A CapCut-style tool bar on phones that changes with the selected clip.
+- Project names are always unique (`Name (2)`, `Name (3)`…); *Save as a copy* from the ⋮ menu.
 
 **Captions (the TikTok kind)**
 - Generate them automatically from speech - the recognition model runs on your device.

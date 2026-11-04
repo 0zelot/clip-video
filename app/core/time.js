@@ -106,3 +106,13 @@ export function parseTime(input) {
   }
   return Number.isFinite(total) ? total : null
 }
+
+/**
+ * Speed needed to play `sourceRange` seconds of media in `targetDuration`
+ * seconds of timeline (e.g. 10 s of footage in 8.6 s → 1.1628×).
+ * @returns {number | null} null for invalid input
+ */
+export function speedForDuration(sourceRange, targetDuration) {
+  if (!(sourceRange > 0) || !(targetDuration > 0) || !Number.isFinite(targetDuration)) return null
+  return sourceRange / targetDuration
+}

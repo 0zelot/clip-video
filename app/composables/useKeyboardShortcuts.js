@@ -10,6 +10,8 @@ export const SHORTCUTS = [
   { group: 'Playback', keys: ['Space'], description: 'Play / pause' },
   { group: 'Playback', keys: ['←', '→'], description: 'Previous / next frame' },
   { group: 'Playback', keys: ['Shift', '←/→'], description: 'Jump 1 second' },
+  { group: 'Playback', keys: ['J', 'L'], description: 'Jump 5 seconds back / forward' },
+  { group: 'Playback', keys: ['K'], description: 'Pause' },
   { group: 'Playback', keys: ['Home', 'End'], description: 'Go to start / end' },
   { group: 'Editing', keys: ['S'], description: 'Split at playhead' },
   { group: 'Editing', keys: ['T'], description: 'Add text at the playhead' },
@@ -28,6 +30,9 @@ export const SHORTCUTS = [
   { group: 'Project', keys: ['Ctrl', 'E'], description: 'Export' },
   { group: 'Timeline', keys: ['+', '−'], description: 'Zoom in / out' },
   { group: 'Timeline', keys: ['Ctrl', 'Wheel'], description: 'Zoom around the cursor' },
+  { group: 'Preview', keys: ['Ctrl', 'Wheel'], description: 'Zoom the preview (pinch on touch screens)' },
+  { group: 'Preview', keys: ['Drag'], description: 'Scrub (or pan when zoomed in)' },
+  { group: 'Preview', keys: ['Double tap'], description: 'Left / right edge: jump 5 seconds' },
   { group: 'Help', keys: ['?'], description: 'Show keyboard shortcuts' },
 ]
 
@@ -100,6 +105,18 @@ export function useKeyboardShortcuts() {
         case 'ArrowRight':
           if (e.shiftKey) commands.seekBy(1)
           else commands.stepFrames(1)
+          break
+        case 'j':
+        case 'J':
+          commands.seekBy(-5)
+          break
+        case 'l':
+        case 'L':
+          commands.seekBy(5)
+          break
+        case 'k':
+        case 'K':
+          commands.pause()
           break
         case 'Home':
           commands.goToStart()
