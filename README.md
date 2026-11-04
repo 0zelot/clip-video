@@ -114,7 +114,8 @@ Then open **http://localhost:3000** in Chrome or Edge. That's it.
 
 **AI and smart tools (all on your device)**
 - **AI voice-over (text to speech)** with several voices - write a dialogue (`A: …`, `B: …`) and every speaker gets
-  their own voice, pitch and speed. Polish voices (Gosia, Darkman, MC Speech, MLS), English (US/UK), German, Spanish,
+  their own voice, pitch, tempo, volume and effect (radio, robot, echo, hall, monster, …); single lines can be changed
+  with `[+3, 1.2x, echo]`, and every line can be previewed. Polish voices (Gosia, Darkman, MC Speech, MLS), English (US/UK), German, Spanish,
   French, Italian, Ukrainian, Czech, Russian, Portuguese and more. Optional captions for the lines.
 - **Auto captions** from speech (Whisper).
 - **Remove silences**: jump-cuts pauses out of talking clips (adjustable threshold and minimum pause).
@@ -213,21 +214,34 @@ Captions live on their own track, so you can still move, trim and delete them li
 
 Open the **Voice** tab (*Voice AI* on a phone).
 
-1. Every **speaker** has a name (`A`, `B`, or `Anna`, `Tom`…), a voice, a pitch and a speed. Press ▶ to hear the voice.
-2. Write the **script**, one line per sentence or paragraph:
+1. Every **speaker** has a name (`A`, `B`, or `Anna`, `Tom`…) and a voice. Press ▶ to hear it. Open the speaker's
+   settings (the arrow) to shape the voice:
+   - **Pitch** -12 … +12 semitones (the tempo stays the same),
+   - **Tempo** 0.5× … 2× (the pitch stays the same),
+   - **Effect**: radio, telephone, megaphone, robot, alien, echo, hall, cave, underwater, monster, breathy - with an
+     *Effect amount* slider,
+   - **Volume** in dB,
+   - one-tap characters: Deep, Giant, Chipmunk, Child, Elderly, Fast talker, Robot, Radio host, Narrator.
+2. Write the **script** - one line per sentence, as many speakers as you like (a dialogue uses several voices in one
+   go):
 
    ```
    A: Hi! What are we recording today?
    B: A quick reel about our new app.
-   A: Let's go.
+   A [+2, fast]: Seriously? Let's go!
+   B [radio, pause 0.5]: This is Radio Clip, live.
    ```
 
-   Lines without a name continue with the previous speaker; unknown names can be added with one click.
-3. Choose the pause between lines and whether captions should be created, then press **Generate voice-over**.
+   Text in square brackets changes the voice of **just that line**: `+3` / `-2` (semitones), `high` / `low`, `1.2x`,
+   `fast` / `slow`, any effect name, `loud` / `quiet`, `pause 1` (seconds of silence before the line). Lines without a
+   name continue with the previous speaker; unknown names can be added with one click.
+3. The list under the script shows who says what - press ▶ next to a line to hear it with all its settings.
+4. Choose the pause between lines and whether captions should be created, then press **Generate voice-over**.
 
 The lines are placed one after another from the playhead on a new audio track. Each voice (~20-60 MB) is downloaded once
 from Hugging Face the first time it is used and then stored on the device - later generations work offline. The text is
-never sent anywhere.
+never sent anywhere. Pitch, tempo and effects are baked into the generated audio, so the preview and the export sound
+the same.
 
 ---
 
@@ -242,6 +256,7 @@ Press **Export** (or `Ctrl+E`):
 | Frame rate | 24, 25, 30, 50 or 60 fps. |
 | Quality | Low / Medium / High, or type an exact bitrate. |
 | Audio | Bitrate, or turn audio off entirely. |
+| Save straight to a file | (Chrome / Edge on a computer and the desktop app) you choose the file first and the video is written to disk while it renders - no memory limit, the right choice for long YouTube videos. On by default for projects longer than 3 minutes. |
 
 Rendering happens in the background, so the app stays responsive, and you can cancel at any time. When it finishes you
 get a preview plus **Download** (on Android: *Save to device* and the system share sheet).
@@ -459,8 +474,13 @@ Runs the unit tests of the editing core (timeline operations, speed ramps, keyfr
   editing; exporting needs WebCodecs.
 - **Downloads on first use only:** auto captions (~45-250 MB model), background removal (~25 MB) and each AI voice
   (~20-60 MB) are downloaded once and then work offline. Everything else works offline from the first start.
-- **Long exports:** the exported file is assembled in memory, so very long, very high-bitrate exports can run out of RAM.
-  For long YouTube videos use 1080p and a medium bitrate.
+- **Long videos:** editing hour-long projects is fine (tested with a 15-minute 720p file, 15 tracks and 840+ clips at
+  ~60 fps on a desktop). For the export use *Save straight to a file* (desktop app, Chrome, Edge): the video is written to
+  disk as it renders and the sound is mixed in 20-second chunks, so memory use stays flat (a 4-minute test export
+  peaked at ~40 MB of JavaScript memory). Browsers without that option (Firefox, Safari, Android) build the file in
+  memory - Clip warns when that gets risky.
+- **Slow phones:** *⋮ → Preview quality* switches between *Auto* (lighter while playing, sharp when paused), *High* and
+  *Fast*. The export always uses full quality.
 - **Speed ramps in the export** are rendered in short slices with natural pitch; extreme ramps on music may sound a little
   grainy.
 - **Exotic codecs** (HEVC or ProRes inside `.mov`, for instance) only work if your system can decode them.

@@ -11,7 +11,7 @@ import { isMediaVisual, isTextual, isVisualItem } from '../model/types'
 import { sourceTimeAt, speedAt } from '../time'
 import { effectsAt, resolveItemAt } from './animate'
 import { buildFilter, computeItemRect } from './layout'
-import { animationState, drawTextItem } from './text'
+import { animationState, drawTextItem, measureTextItem, resolveStyle } from './text'
 
 /**
  * @typedef {CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D} Ctx2D
@@ -605,8 +605,116 @@ function drawTextLayer(ctx, layer, project, modifier = {}) {
   if (alpha < 1) ctx.globalAlpha = alpha
   if (item.blendMode && item.blendMode !== 'normal') ctx.globalCompositeOperation = item.blendMode
   if (modifier.translateX || modifier.translateY) ctx.translate(modifier.translateX ?? 0, modifier.translateY ?? 0)
-  drawTextItem(ctx, item, project.settings, layer.localTime)
+  if (!drawCachedText(ctx, layer.item, item, project, layer.localTime ?? 0)) drawTextItem(ctx, item, project.settings, layer.localTime)
   ctx.restore()
+}
+
+// ---------------------------------------------------------------------------
+// Text cache
+//
+// Outlines, shadows and glows are expensive to rasterise, and most text is
+// static between its in and out animations. Such text is drawn once into a
+// small bitmap and then blitted every frame - a big win with many titles or
+// captions, especially on phones and in long exports.
+// ---------------------------------------------------------------------------
+
+const TEXT_CACHE_LIMIT = 48
+/** @type {Map<string, { source: object, scale: number, epoch: number, canvas: any, w: number, h: number }>} */
+const textCache = new Map()
+let fontEpoch = 0
+if (typeof document !== 'undefined' && document.fonts?.addEventListener) {
+  document.fonts.addEventListener('loadingdone', () => fontEpoch++)
+}
+/** Forget cached text bitmaps (e.g. after fonts were registered in a worker). */
+export function invalidateTextCache() {
+  fontEpoch++
+  textCache.clear()
+}
+
+const STATIC_EFFECTS = new Set(['none', 'extrude', 'rgbSplit', undefined])
+
+function isStaticText(item, local) {
+  if (!STATIC_EFFECTS.has(item.style?.effect)) return false
+  if (item.type === 'caption' && item.style?.highlight && item.style.highlight !== 'none') return false
+  const enter = item.animation?.in
+  const exit = item.animation?.out
+  if (enter && enter.kind !== 'none' && local < enter.duration) return false
+  if (exit && exit.kind !== 'none' && local > item.duration - exit.duration) return false
+  return true
+}
+
+let textMeasureCtx = null
+function measureCtx() {
+  if (!textMeasureCtx) {
+    const c = typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(8, 8) : document.createElement('canvas')
+    textMeasureCtx = c.getContext('2d')
+  }
+  return textMeasureCtx
+}
+
+function makeCanvas(w, h) {
+  if (typeof OffscreenCanvas !== 'undefined') return new OffscreenCanvas(w, h)
+  const c = document.createElement('canvas')
+  c.width = w
+  c.height = h
+  return c
+}
+
+/** @returns {boolean} whether the text was drawn from the cache */
+function drawCachedText(ctx, source, item, project, local) {
+  if (!isStaticText(item, local) || typeof ctx.getTransform !== 'function') return false
+  const m = ctx.getTransform()
+  const deviceScale = Math.hypot(m.a, m.b)
+  const tr = item.transform
+  const pixelScale = deviceScale * tr.scale
+  if (!(pixelScale > 0)) return false
+
+  let entry = textCache.get(source.id)
+  const fresh = entry && entry.source === source && entry.epoch === fontEpoch && Math.abs(entry.scale - pixelScale) / pixelScale < 0.04
+  if (!fresh) {
+    const { width: pw, height: ph } = project.settings
+    const flat = { ...item, transform: { ...tr, x: 0, y: 0, rotation: 0, scale: 1 }, opacity: 1 }
+    const size = measureTextItem(measureCtx(), flat, project.settings)
+    const r = resolveStyle(item.style, pw, ph)
+    const reach =
+      r.fontSize * 0.6 +
+      r.strokeWidth * 2 +
+      (item.style.stroke2?.width ?? 0) * r.fontSize * 2 +
+      r.shadowBlur * 2 +
+      Math.max(Math.abs(r.shadowOffsetX), Math.abs(r.shadowOffsetY)) +
+      (item.style.effect === 'extrude' ? r.fontSize * 0.12 : 0) +
+      (item.style.effect === 'rgbSplit' ? r.fontSize * 0.06 : 0)
+    const w = Math.ceil((size.width + reach * 2) * pixelScale)
+    const h = Math.ceil((size.height + reach * 2) * pixelScale)
+    if (w < 1 || h < 1 || w * h > 16_000_000) return false
+    const canvas = entry?.canvas && entry.canvas.width >= w && entry.canvas.height >= h && entry.canvas.width < w * 1.5 ? entry.canvas : makeCanvas(w, h)
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width = w
+      canvas.height = h
+    }
+    const c = canvas.getContext('2d')
+    if (!c) return false
+    c.setTransform(1, 0, 0, 1, 0, 0)
+    c.clearRect(0, 0, w, h)
+    c.setTransform(pixelScale, 0, 0, pixelScale, w / 2, h / 2)
+    drawTextItem(c, flat, project.settings, local)
+    entry = { source, scale: pixelScale, epoch: fontEpoch, canvas, w, h }
+    textCache.delete(source.id)
+    textCache.set(source.id, entry)
+    while (textCache.size > TEXT_CACHE_LIMIT) textCache.delete(textCache.keys().next().value)
+  } else {
+    // Refresh LRU position.
+    textCache.delete(source.id)
+    textCache.set(source.id, entry)
+  }
+
+  const { width: pw, height: ph } = project.settings
+  ctx.translate(tr.x * pw, tr.y * ph)
+  if (tr.rotation) ctx.rotate((tr.rotation * Math.PI) / 180)
+  ctx.globalAlpha *= Math.min(1, Math.max(0, item.opacity))
+  // One cache pixel equals 1/deviceScale project units.
+  ctx.drawImage(entry.canvas, 0, 0, entry.w, entry.h, -entry.w / (2 * deviceScale), -entry.h / (2 * deviceScale), entry.w / deviceScale, entry.h / deviceScale)
+  return true
 }
 
 /**
@@ -624,7 +732,7 @@ export function renderFrame(ctx, project, time, provider, options) {
   ctx.save()
   ctx.setTransform(options.scale, 0, 0, options.scale, 0, 0)
   ctx.imageSmoothingEnabled = true
-  ctx.imageSmoothingQuality = 'high'
+  ctx.imageSmoothingQuality = options.smoothing ?? 'high'
   drawBackground(ctx, project, project.settings.background, layers, provider, options.scale)
 
   for (const layer of layers) {

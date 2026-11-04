@@ -180,6 +180,10 @@ function onScroll() {
   if (!scrollRaf) {
     scrollRaf = requestAnimationFrame(() => {
       scrollRaf = 0
+      const current = viewport.value
+      // Rulers and strips draw a margin around the visible part, so small
+      // scroll steps (e.g. following the playhead) need no re-render.
+      if (Math.abs(current.scrollLeft - el.scrollLeft) < 60 && current.width === el.clientWidth) return
       viewport.value = { scrollLeft: el.scrollLeft, width: el.clientWidth }
     })
   }

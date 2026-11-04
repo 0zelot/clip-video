@@ -6,11 +6,12 @@
  * and each line is spoken by that speaker's voice and placed on a new audio
  * track, one after another (optionally with captions).
  */
-import { Loader2, Mic, Play, Plus, Trash2, UserRound } from 'lucide-vue-next'
+import { ChevronDown, Loader2, Mic, Play, Plus, Square, Trash2, UserRound } from 'lucide-vue-next'
 import { distributeWords, wordsToPhrases } from '~/core/captions'
 import { createItemFromAsset } from '~/core/model/defaults'
 import { addTrack, insertItem } from '~/core/operations/items'
 import { TTS_VOICES, canSpeak, parseScript, speak, storedVoices } from '~/services/ai/tts'
+import { VOICE_EFFECTS, VOICE_PRESETS } from '~/services/ai/voiceFx'
 import { useCaptionsStore } from '~/stores/captions'
 import { useEditorStore } from '~/stores/editor'
 import { useMediaStore } from '~/stores/media'
@@ -25,19 +26,22 @@ const captions = useCaptionsStore()
 const ui = useUiStore()
 const online = useOnline()
 
+const COLORS = ['#2ee6d6', '#ff7ab6', '#ffd166', '#8ab4ff', '#9dffb0', '#ff9f5a']
+const speakerDefaults = (s, i) => ({ pitch: 0, rate: 1, effect: 'none', mix: 0.8, volume: 0, open: false, color: COLORS[i % COLORS.length], ...s })
+
 function load() {
   try {
     const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null')
-    if (raw && Array.isArray(raw.speakers) && raw.speakers.length) return raw
+    if (raw && Array.isArray(raw.speakers) && raw.speakers.length) return { ...raw, speakers: raw.speakers.map(speakerDefaults) }
   } catch {
     // ignore
   }
   return {
     speakers: [
-      { name: 'A', voiceId: 'pl_PL-gosia-medium', pitch: 0, rate: 1 },
-      { name: 'B', voiceId: 'pl_PL-darkman-medium', pitch: 0, rate: 1 },
+      speakerDefaults({ name: 'A', voiceId: 'pl_PL-gosia-medium' }, 0),
+      speakerDefaults({ name: 'B', voiceId: 'pl_PL-darkman-medium' }, 1),
     ],
-    script: 'A: Cześć! Co dziś nagrywamy?\nB: Szybką rolkę o naszej nowej aplikacji.',
+    script: 'A: Cześć! Co dziś nagrywamy?\nB: Szybką rolkę o naszej nowej aplikacji.\nA [+2, fast]: Serio? Lecimy!\nB [radio]: Tu radio Clip, nadajemy na żywo.',
     gap: 0.25,
     withCaptions: true,
   }
@@ -84,8 +88,75 @@ const unknownNames = computed(() => {
 
 function addSpeaker(name) {
   const used = new Set(state.speakers.map((s) => s.voiceId))
-  const voice = TTS_VOICES.find((v) => !used.has(v.id)) ?? TTS_VOICES[0]
-  state.speakers.push({ name: name ?? String.fromCharCode(65 + state.speakers.length), voiceId: voice.id, pitch: 0, rate: 1 })
+  // Prefer an unused voice of the same language as the first speaker.
+  const lang = TTS_VOICES.find((v) => v.id === state.speakers[0]?.voiceId)?.lang
+  const voice = TTS_VOICES.find((v) => !used.has(v.id) && v.lang === lang) ?? TTS_VOICES.find((v) => !used.has(v.id)) ?? TTS_VOICES[0]
+  state.speakers.push(speakerDefaults({ name: name ?? String.fromCharCode(65 + state.speakers.length), voiceId: voice.id, open: true }, state.speakers.length))
+}
+
+function applyPreset(speaker, preset) {
+  speaker.pitch = preset.pitch
+  speaker.rate = preset.rate
+  speaker.effect = preset.effect
+}
+
+/** Final voice settings of a line: the speaker's, adjusted by the line's [ … ] overrides. */
+function settingsFor(line) {
+  const speaker = speakerFor(line.speaker)
+  const o = line.overrides ?? {}
+  return {
+    voiceId: speaker.voiceId,
+    pitch: (speaker.pitch ?? 0) + (o.pitch ?? 0),
+    rate: (speaker.rate ?? 1) * (o.rate ?? 1),
+    effect: o.effect ?? speaker.effect ?? 'none',
+    mix: speaker.mix ?? 0.8,
+    volume: (speaker.volume ?? 0) + (o.volume ?? 0),
+  }
+}
+
+function describe(o) {
+  const parts = []
+  if (o.pitch) parts.push(`${o.pitch > 0 ? '+' : ''}${o.pitch} st`)
+  if (o.rate) parts.push(`${o.rate}×`)
+  if (o.effect) parts.push(o.effect)
+  if (o.volume) parts.push(o.volume > 0 ? 'louder' : 'quieter')
+  if (o.pause) parts.push(`pause ${o.pause}s`)
+  return parts.join(' · ')
+}
+
+/** Appends a new line for a speaker to the script. */
+function addLine(speaker) {
+  state.script = `${state.script.replace(/\s+$/, '')}\n${speaker.name}: `
+}
+
+const playingKey = ref(null)
+async function previewLine(line, index) {
+  if (playingKey.value === index) {
+    audio?.pause()
+    playingKey.value = null
+    return
+  }
+  if (busy.value) return
+  busy.value = true
+  progress.value = { label: `Line ${index + 1}`, ratio: 0 }
+  try {
+    const wav = await speak({ text: line.text, ...settingsFor(line) }, onProgress)
+    stored.value = await storedVoices()
+    play(wav, index)
+  } catch (error) {
+    reportError(error)
+  } finally {
+    busy.value = false
+    progress.value = null
+  }
+}
+
+function play(wav, key) {
+  audio?.pause()
+  audio = new Audio(URL.createObjectURL(wav))
+  playingKey.value = key
+  audio.onended = () => (playingKey.value = null)
+  void audio.play()
 }
 
 const busy = ref(false)
@@ -97,11 +168,20 @@ async function testVoice(speaker) {
   busy.value = true
   progress.value = { label: `Preparing ${speaker.name}…`, ratio: 0 }
   try {
-    const wav = await speak({ text: speaker.voiceId.startsWith('pl') ? 'Cześć, tak brzmi mój głos.' : 'Hi, this is how I sound.', voiceId: speaker.voiceId, pitch: speaker.pitch, rate: speaker.rate }, onProgress)
+    const wav = await speak(
+      {
+        text: speaker.voiceId.startsWith('pl') ? 'Cześć, tak brzmi mój głos.' : 'Hi, this is how I sound.',
+        voiceId: speaker.voiceId,
+        pitch: speaker.pitch,
+        rate: speaker.rate,
+        effect: speaker.effect,
+        mix: speaker.mix,
+        volume: speaker.volume,
+      },
+      onProgress,
+    )
     stored.value = await storedVoices()
-    audio?.pause()
-    audio = new Audio(URL.createObjectURL(wav))
-    void audio.play()
+    play(wav, `speaker-${speaker.name}`)
   } catch (error) {
     reportError(error)
   } finally {
@@ -139,7 +219,7 @@ async function generate() {
       const line = todo[i]
       const speaker = speakerFor(line.speaker)
       progress.value = { label: `Line ${i + 1} of ${todo.length} · ${speaker.name}`, ratio: 0 }
-      const wav = await speak({ text: line.text, voiceId: speaker.voiceId, pitch: speaker.pitch, rate: speaker.rate }, onProgress)
+      const wav = await speak({ text: line.text, ...settingsFor(line) }, onProgress)
       files.push({ file: new File([wav], `Voice ${speaker.name} ${i + 1}.wav`, { type: 'audio/wav', lastModified: Date.now() }), line })
     }
     stored.value = await storedVoices()
@@ -155,8 +235,9 @@ async function generate() {
       track.name = `Voice ${draft.tracks.filter((t) => t.kind === 'audio').length}`
       const ids = []
       assets.forEach((asset, i) => {
+        cursor += files[i].line.overrides?.pause ?? 0
         const item = createItemFromAsset(asset, cursor)
-        item.name = `${files[i].line.speaker ?? state.speakers[0].name}: ${files[i].line.text.slice(0, 30)}`
+        item.name = `${speakerFor(files[i].line.speaker).name}: ${files[i].line.text.slice(0, 30)}`
         const inserted = insertItem(draft, track.id, item, { exact: true })
         if (inserted) {
           ids.push(inserted.id)
@@ -187,21 +268,51 @@ async function generate() {
 
     <!-- speakers -->
     <div class="space-y-2">
-      <div v-for="(speaker, i) in state.speakers" :key="i" class="rounded-xl border border-line bg-panel-2 p-2.5">
-        <div class="flex items-center gap-2">
-          <UserRound class="size-4 shrink-0 text-accent" />
-          <input v-model="speaker.name" class="field h-8 w-16 font-semibold" maxlength="24" aria-label="Speaker name" />
+      <div v-for="(speaker, i) in state.speakers" :key="i" class="rounded-xl border border-line bg-panel-2 p-2.5" :style="{ borderLeft: `3px solid ${speaker.color}` }">
+        <div class="flex items-center gap-1.5">
+          <UserRound class="size-4 shrink-0" :style="{ color: speaker.color }" />
+          <input v-model="speaker.name" class="field h-8 w-14 font-semibold" maxlength="24" aria-label="Speaker name" />
           <select v-model="speaker.voiceId" class="field h-8 min-w-0 flex-1" aria-label="Voice">
             <optgroup v-for="[lang, voices] in languages" :key="lang" :label="lang">
               <option v-for="v in voices" :key="v.id" :value="v.id">{{ v.label }} ({{ v.gender }}){{ stored.includes(v.id) ? ' ✓' : '' }}</option>
             </optgroup>
           </select>
-          <UiIconButton :icon="Play" label="Test voice" size="sm" :disabled="busy" @click="testVoice(speaker)" />
-          <UiIconButton v-if="state.speakers.length > 1" :icon="Trash2" label="Remove speaker" size="sm" @click="state.speakers.splice(i, 1)" />
+          <UiIconButton :icon="playingKey === `speaker-${speaker.name}` ? Square : Play" label="Test voice" size="sm" :disabled="busy" @click="testVoice(speaker)" />
+          <UiIconButton :icon="ChevronDown" :label="speaker.open ? 'Hide voice settings' : 'Voice settings'" size="sm" :class="speaker.open ? 'rotate-180' : ''" @click="speaker.open = !speaker.open" />
         </div>
-        <div class="mt-1 grid grid-cols-2 gap-2">
-          <UiSlider v-model="speaker.pitch" label="Pitch" :min="-6" :max="6" :step="0.5" :format="(v) => `${v > 0 ? '+' : ''}${v} st`" />
-          <UiSlider v-model="speaker.rate" label="Speed" :min="0.6" :max="1.8" :step="0.05" :format="(v) => `${v.toFixed(2)}×`" />
+        <p v-if="!speaker.open" class="mt-1 truncate pl-6 text-[11px] text-muted">
+          {{ speaker.pitch ? `${speaker.pitch > 0 ? '+' : ''}${speaker.pitch} st · ` : '' }}{{ speaker.rate !== 1 ? `${speaker.rate.toFixed(2)}× · ` : '' }}{{ VOICE_EFFECTS.find((e) => e.id === speaker.effect)?.label ?? 'Natural' }}
+        </p>
+        <div v-else class="mt-2 space-y-2">
+          <div class="-mx-0.5 flex flex-wrap gap-1">
+            <button
+              v-for="preset in VOICE_PRESETS"
+              :key="preset.id"
+              type="button"
+              class="rounded-full border border-line px-2 py-0.5 text-[11px] text-muted hover:border-accent hover:text-accent"
+              @click="applyPreset(speaker, preset)"
+            >
+              {{ preset.label }}
+            </button>
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <UiSlider v-model="speaker.pitch" label="Pitch" :min="-12" :max="12" :step="0.5" :format="(v) => `${v > 0 ? '+' : ''}${v} st`" />
+            <UiSlider v-model="speaker.rate" label="Tempo" :min="0.5" :max="2" :step="0.05" :format="(v) => `${v.toFixed(2)}×`" />
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <label class="block">
+              <span class="label">Effect</span>
+              <select v-model="speaker.effect" class="field">
+                <option v-for="e in VOICE_EFFECTS" :key="e.id" :value="e.id">{{ e.label }}</option>
+              </select>
+            </label>
+            <UiSlider v-model="speaker.mix" label="Effect amount" :min="0" :max="1" :step="0.05" :disabled="speaker.effect === 'none'" :format="(v) => `${Math.round(v * 100)}%`" />
+          </div>
+          <UiSlider v-model="speaker.volume" label="Volume" :min="-18" :max="12" :step="1" :format="(v) => `${v > 0 ? '+' : ''}${v} dB`" />
+          <div class="flex justify-between">
+            <UiButton size="sm" variant="ghost" @click="addLine(speaker)">+ line for {{ speaker.name }}</UiButton>
+            <UiButton v-if="state.speakers.length > 1" size="sm" variant="danger" :icon="Trash2" @click="state.speakers.splice(i, 1)">Remove</UiButton>
+          </div>
         </div>
       </div>
       <UiButton size="sm" block :icon="Plus" @click="addSpeaker()">Add speaker</UiButton>
@@ -216,6 +327,22 @@ async function generate() {
       <span class="label">Script</span>
       <textarea v-model="state.script" rows="7" class="field h-auto py-1.5 leading-snug" placeholder="A: Hello!&#10;B: Hi, how are you?" />
     </label>
+    <p class="text-[11px] text-muted">
+      Change the voice of a single line in brackets: <span class="font-mono text-fg">B [+3, 1.2x, echo]: Really?!</span> -
+      pitch (<span class="font-mono">+3</span>, <span class="font-mono">high</span>/<span class="font-mono">low</span>), tempo (<span class="font-mono">1.2x</span>, <span class="font-mono">fast</span>/<span class="font-mono">slow</span>), an effect, <span class="font-mono">loud</span>/<span class="font-mono">quiet</span>, <span class="font-mono">pause 1</span>.
+    </p>
+
+    <!-- parsed dialogue -->
+    <ol v-if="lines.length" class="space-y-1">
+      <li v-for="(line, i) in lines" :key="i" class="flex items-start gap-2 rounded-lg bg-panel-2 px-2 py-1.5">
+        <span class="mt-0.5 shrink-0 rounded px-1.5 text-[10px] font-bold text-black" :style="{ background: speakerFor(line.speaker)?.color }">{{ speakerFor(line.speaker)?.name }}</span>
+        <span class="min-w-0 flex-1 text-xs leading-snug">
+          {{ line.text }}
+          <span v-if="describe(line.overrides)" class="block text-[10px] text-accent">{{ describe(line.overrides) }}</span>
+        </span>
+        <UiIconButton :icon="playingKey === i ? Square : Play" label="Listen to this line" size="sm" :disabled="busy && playingKey !== i" @click="previewLine(line, i)" />
+      </li>
+    </ol>
     <p class="text-[11px] text-muted">{{ lines.length }} line{{ lines.length === 1 ? '' : 's' }} · placed from the playhead on a new audio track.</p>
 
     <UiSlider v-model="state.gap" label="Pause between lines" :min="0" :max="1.5" :step="0.05" :format="(v) => `${v.toFixed(2)} s`" />

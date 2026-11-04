@@ -12,9 +12,17 @@ const editor = useEditorStore()
 
 // Playhead time (rounded to ~frames so the panel does not re-render constantly).
 const playhead = ref(0)
+let lastUpdate = 0
 usePlaybackTime((time) => {
   const r = Math.round(time * 30) / 30
-  if (r !== playhead.value) playhead.value = r
+  if (r === playhead.value) return
+  if (editor.playing) {
+    // While playing only animated clips need live values, ~10 times a second.
+    const now = performance.now()
+    if (!hasKeyframes(props.item) || now - lastUpdate < 100) return
+    lastUpdate = now
+  }
+  playhead.value = r
 })
 const local = computed(() => Math.min(props.item.duration, Math.max(0, playhead.value - props.item.start)))
 const insideClip = computed(() => playhead.value >= props.item.start - 1e-6 && playhead.value <= props.item.start + props.item.duration + 1e-6)

@@ -8,7 +8,7 @@
  * Pitch and speed of a speaker are baked into the generated WAV, so the clip
  * sounds the same in the preview and in the export.
  */
-import { speedAndPitch, stretchAudioBuffer } from '../export/timeStretch'
+import { parseOverrides, processVoice } from './voiceFx'
 
 /** Curated voices (Polish first), id → label. Any Piper voice id works. */
 export const TTS_VOICES = [
@@ -41,6 +41,8 @@ export const TTS_VOICES = [
 
 let libPromise = null
 function lib() {
+  // Automated tests can provide a stand-in engine (same API) to run offline.
+  if (globalThis.__clipTtsEngine) return Promise.resolve(globalThis.__clipTtsEngine)
   if (!libPromise) libPromise = import('@diffusionstudio/vits-web')
   return libPromise
 }
@@ -58,87 +60,42 @@ export async function storedVoices() {
   }
 }
 
+/** Raw speech cache (voice + text → WAV), so previews and re-generations are instant. */
+const cache = new Map()
+
 /**
- * Generates speech.
- * @param {{ text: string, voiceId: string, pitch?: number, rate?: number }} options
+ * Generates speech with optional modulation.
+ * @param {{ text: string, voiceId: string } & import('./voiceFx').VoiceSettings} options
  * @param {(p: { phase: 'download' | 'speaking', ratio: number }) => void} [onProgress]
  * @returns {Promise<Blob>} WAV
  */
 export async function speak(options, onProgress) {
-  const tts = await lib()
   const text = options.text.trim()
   if (!text) throw new Error('Nothing to say')
-  const stored = await storedVoices()
-  if (!stored.includes(options.voiceId)) {
-    await tts.download(options.voiceId, (p) => {
-      if (p.total) onProgress?.({ phase: 'download', ratio: p.loaded / p.total })
-    })
-  }
-  onProgress?.({ phase: 'speaking', ratio: 0 })
-  const wav = await tts.predict({ text, voiceId: options.voiceId })
-  onProgress?.({ phase: 'speaking', ratio: 1 })
-  const rate = options.rate ?? 1
-  const pitch = options.pitch ?? 0
-  if (Math.abs(rate - 1) < 0.01 && Math.abs(pitch) < 0.05) return wav
-  return reshape(wav, rate, pitch)
-}
-
-/** Changes speed (keeping pitch) and pitch of a WAV. */
-async function reshape(blob, rate, semitones) {
-  const data = await blob.arrayBuffer()
-  const decoder = new OfflineAudioContext(1, 1, 44100)
-  const decoded = await decoder.decodeAudioData(data)
-  const { playbackRate, stretchFactor } = speedAndPitch(rate, semitones)
-  const ctx = new OfflineAudioContext(decoded.numberOfChannels, Math.max(1, Math.ceil((decoded.duration / rate) * decoded.sampleRate)), decoded.sampleRate)
-  const stretched = stretchAudioBuffer(ctx, decoded, stretchFactor)
-  const source = ctx.createBufferSource()
-  source.buffer = stretched
-  source.playbackRate.value = playbackRate
-  source.connect(ctx.destination)
-  source.start(0)
-  const rendered = await ctx.startRendering()
-  return encodeWav(rendered)
-}
-
-/** 16-bit PCM WAV encoder. */
-export function encodeWav(buffer) {
-  const channels = buffer.numberOfChannels
-  const length = buffer.length
-  const bytes = 44 + length * channels * 2
-  const view = new DataView(new ArrayBuffer(bytes))
-  const writeString = (offset, s) => {
-    for (let i = 0; i < s.length; i++) view.setUint8(offset + i, s.charCodeAt(i))
-  }
-  writeString(0, 'RIFF')
-  view.setUint32(4, bytes - 8, true)
-  writeString(8, 'WAVE')
-  writeString(12, 'fmt ')
-  view.setUint32(16, 16, true)
-  view.setUint16(20, 1, true)
-  view.setUint16(22, channels, true)
-  view.setUint32(24, buffer.sampleRate, true)
-  view.setUint32(28, buffer.sampleRate * channels * 2, true)
-  view.setUint16(32, channels * 2, true)
-  view.setUint16(34, 16, true)
-  writeString(36, 'data')
-  view.setUint32(40, length * channels * 2, true)
-  const data = []
-  for (let c = 0; c < channels; c++) data.push(buffer.getChannelData(c))
-  let offset = 44
-  for (let i = 0; i < length; i++) {
-    for (let c = 0; c < channels; c++) {
-      const v = Math.max(-1, Math.min(1, data[c][i]))
-      view.setInt16(offset, v < 0 ? v * 0x8000 : v * 0x7fff, true)
-      offset += 2
+  const key = `${options.voiceId}\u0000${text}`
+  let wav = cache.get(key)
+  if (!wav) {
+    const tts = await lib()
+    const stored = await storedVoices()
+    if (!stored.includes(options.voiceId)) {
+      await tts.download(options.voiceId, (p) => {
+        if (p.total) onProgress?.({ phase: 'download', ratio: p.loaded / p.total })
+      })
     }
+    onProgress?.({ phase: 'speaking', ratio: 0 })
+    wav = await tts.predict({ text, voiceId: options.voiceId })
+    if (cache.size > 60) cache.delete(cache.keys().next().value)
+    cache.set(key, wav)
   }
-  return new Blob([view.buffer], { type: 'audio/wav' })
+  onProgress?.({ phase: 'speaking', ratio: 1 })
+  return processVoice(wav, options)
 }
 
 /**
- * Parses a dialogue script: lines like `A: Hello` or `Anna: Hi there`.
- * Lines without a speaker continue with the previous one.
- * @returns {{ speaker: string | null, text: string }[]}
+ * Parses a dialogue script: lines like `A: Hello`, `Anna: Hi there` or with
+ * per-line voice changes `B [+3, 1.2x, echo]: Really?!`. Lines without a
+ * speaker continue with the previous one.
+ * @returns {{ speaker: string | null, text: string, overrides: ReturnType<typeof parseOverrides> }[]}
  */
 export function parseScript(script) {
   const lines = []
@@ -146,13 +103,15 @@ export function parseScript(script) {
   for (const raw of script.split(/\r?\n/)) {
     const line = raw.trim()
     if (!line) continue
-    const m = /^([\p{L}\p{N} _.-]{1,24}):\s*(.+)$/u.exec(line)
+    const m = /^([\p{L}\p{N} _.-]{1,24}?)\s*(?:\[([^\]]*)\])?\s*:\s*(.+)$/u.exec(line)
     if (m) {
       current = m[1].trim()
-      lines.push({ speaker: current, text: m[2].trim() })
+      lines.push({ speaker: current, text: m[3].trim(), overrides: m[2] ? parseOverrides(m[2]) : {} })
     } else {
-      lines.push({ speaker: current, text: line })
+      lines.push({ speaker: current, text: line, overrides: {} })
     }
   }
   return lines
 }
+
+export { encodeWav } from './voiceFx'

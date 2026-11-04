@@ -89,9 +89,12 @@ function ensureCanvasSize() {
   const c = canvas.value
   const settings = projectStore.project?.settings
   if (!c || !settings || surface.value.width === 0) return false
-  const dpr = Math.min(window.devicePixelRatio || 1, 2)
-  // Never render more pixels than the project resolution.
-  const targetWidth = Math.max(2, Math.min(settings.width, Math.round(surface.value.width * dpr)))
+  const device = window.devicePixelRatio || 1
+  const quality = editor.previewQuality
+  // Fewer pixels while playing keep playback smooth on slower devices.
+  const dpr = quality === 'fast' ? 0.75 : quality === 'high' || !editor.playing ? Math.min(device, 2) : Math.min(device, 1)
+  // Never render more pixels than the project resolution (nor absurdly few).
+  const targetWidth = Math.max(2, Math.min(settings.width, Math.max(240, Math.round(surface.value.width * dpr))))
   const targetHeight = Math.max(2, Math.round((targetWidth * settings.height) / settings.width))
   if (c.width !== targetWidth || c.height !== targetHeight) {
     c.width = targetWidth
@@ -129,7 +132,12 @@ function draw() {
     return
   }
 
-  renderFrame(ctx, project, time, provider, { scale: canvas.value.width / project.settings.width, showMissing: true })
+  renderFrame(ctx, project, time, provider, {
+    scale: canvas.value.width / project.settings.width,
+    showMissing: true,
+    // Cheaper scaling while playing; full quality for still frames and the export.
+    smoothing: engine.playing && editor.previewQuality !== 'high' ? 'low' : 'high',
+  })
   if (!pending) lastGoodDraw = performance.now()
   // A snapshot stood in for a seeking video: redraw shortly with the real frame.
   if ((pending || provider.usedSnapshot) && !engine.playing) {
@@ -162,6 +170,7 @@ watch(
 )
 watch(() => projectStore.project, requestRender)
 watch(surface, requestRender)
+watch(() => [editor.playing, editor.previewQuality], requestRender)
 watch(aspect, resetView)
 
 onMounted(() => {

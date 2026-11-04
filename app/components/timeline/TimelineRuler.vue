@@ -14,8 +14,9 @@ const step = computed(() => STEPS.find((s) => s * editor.zoom >= 80) ?? STEPS[ST
 
 const ticks = computed(() => {
   const { scrollLeft, width } = viewport.value
-  const from = Math.max(0, Math.floor(scrollLeft / editor.zoom / step.value) * step.value)
-  const to = (scrollLeft + width) / editor.zoom + step.value
+  // A margin on both sides covers small scroll steps between viewport updates.
+  const from = Math.max(0, Math.floor((scrollLeft - 200) / editor.zoom / step.value) * step.value)
+  const to = (scrollLeft + width + 200) / editor.zoom + step.value
   const result = []
   const fps = projectStore.project?.settings.fps ?? 30
   for (let t = from; t <= to; t += step.value) {

@@ -26,10 +26,6 @@ const projectStore = useProjectStore()
 const editor = useEditorStore()
 
 const time = ref(0)
-usePlaybackTime((t) => {
-  const r = Math.round(t * 30) / 30
-  if (r !== time.value) time.value = r
-})
 
 const item = computed(() => {
   const project = projectStore.project
@@ -42,6 +38,16 @@ const locked = computed(() => {
   const project = projectStore.project
   return !!(project && item.value && locateItem(project, item.value.id)?.track.locked)
 })
+
+// The playhead only matters here when it changes what the box looks like:
+// while playing, skip updates unless the clip is animated or (dis)appears.
+usePlaybackTime((t) => {
+  const r = Math.round(t * 30) / 30
+  if (r === time.value) return
+  const it = item.value
+  if (!editor.playing || (it && (hasKeyframes(it) || isActiveAt(it, r) !== isActiveAt(it, time.value)))) time.value = r
+})
+watch(item, () => (time.value = Math.round(editor.currentTime() * 30) / 30))
 
 const visible = computed(() => !!item.value && isActiveAt(item.value, time.value) && props.surface.width > 0)
 const local = computed(() => (item.value ? Math.max(0, time.value - item.value.start) : 0))

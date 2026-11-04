@@ -10,6 +10,16 @@ export const MAX_ZOOM = 600
 
 const TIMELINE_HEIGHT_KEY = 'clip:timeline-height'
 const CENTER_PLAYHEAD_KEY = 'clip:center-playhead'
+const PREVIEW_QUALITY_KEY = 'clip:preview-quality'
+
+function readQuality() {
+  try {
+    const v = localStorage.getItem(PREVIEW_QUALITY_KEY)
+    return v === 'high' || v === 'fast' ? v : 'auto'
+  } catch {
+    return 'auto'
+  }
+}
 
 function readCenterPlayhead() {
   try {
@@ -57,6 +67,19 @@ export const useEditorStore = defineStore('editor', () => {
   const propertiesFocus = ref(null)
   /** Timeline scrolls under a fixed, centred playhead (scrolling = scrubbing). */
   const centerPlayhead = ref(readCenterPlayhead())
+  /**
+   * Preview resolution: 'auto' renders sharper when paused and lighter while
+   * playing, 'high' always sharp, 'fast' always light (slow phones).
+   */
+  const previewQuality = ref(readQuality())
+  function setPreviewQuality(value) {
+    previewQuality.value = value
+    try {
+      localStorage.setItem(PREVIEW_QUALITY_KEY, value)
+    } catch {
+      // optional
+    }
+  }
   const exportOpen = ref(false)
   /** @type {import('vue').ShallowRef<PlaybackEngine | null>} */
   const engine = shallowRef(null)
@@ -154,6 +177,8 @@ export const useEditorStore = defineStore('editor', () => {
     propertiesFocus,
     centerPlayhead,
     setCenterPlayhead,
+    previewQuality,
+    setPreviewQuality,
     exportOpen,
     engine,
     focusProperties,

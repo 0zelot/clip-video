@@ -7,7 +7,7 @@ const MAX_IDLE_MS = 8000
 const MAX_POOL_SIZE = 12
 const DRIFT_TOLERANCE = 0.3
 const LOOKAHEAD = 1.5
-const SNAPSHOT_MAX_SIZE = 720
+const SNAPSHOT_MAX_SIZE = 640
 const SNAPSHOT_INTERVAL_MS = 120
 
 /** Source time an upcoming clip should wait at: its first frame (or now, if it already started). */

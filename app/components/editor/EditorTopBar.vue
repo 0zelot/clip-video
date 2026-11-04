@@ -1,5 +1,5 @@
 <script setup>
-import { ChevronLeft, CircleHelp, CopyPlus, Download, MoreVertical, Redo2, Save, Undo2 } from 'lucide-vue-next'
+import { ChevronLeft, CircleHelp, CopyPlus, Download, MonitorPlay, MoreVertical, Redo2, Save, Undo2 } from 'lucide-vue-next'
 import { projectRepository } from '~/services/storage/projectRepository'
 import { isMac } from '~/services/platform/platform'
 import { session } from '~/services/session'
@@ -60,6 +60,11 @@ function openMenu(e) {
 const menuItems = computed(() => [
   { label: 'Save now', icon: Save, shortcut: `${mod}S`, disabled: projectStore.saveStatus === 'saving', run: () => commands.save() },
   { label: 'Save as a copy', icon: CopyPlus, run: () => saveAsCopy() },
+  {
+    label: `Preview quality: ${{ auto: 'Auto', high: 'High', fast: 'Fast' }[editor.previewQuality]}`,
+    icon: MonitorPlay,
+    run: () => editor.setPreviewQuality({ auto: 'high', high: 'fast', fast: 'auto' }[editor.previewQuality]),
+  },
   { separator: true },
   { label: 'Keyboard shortcuts', icon: CircleHelp, shortcut: '?', run: () => (ui.shortcutsOpen = true) },
 ])

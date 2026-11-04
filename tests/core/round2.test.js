@@ -138,10 +138,16 @@ describe('overlays, blur, freeze frame, markers', () => {
 describe('dialogue scripts', () => {
   it('parses speakers and continuation lines', () => {
     expect(parseScript('A: Cześć!\nB: Hej\ndalej mówi B\n\nAnna Maria: Tak')).toEqual([
-      { speaker: 'A', text: 'Cześć!' },
-      { speaker: 'B', text: 'Hej' },
-      { speaker: 'B', text: 'dalej mówi B' },
-      { speaker: 'Anna Maria', text: 'Tak' },
+      { speaker: 'A', text: 'Cześć!', overrides: {} },
+      { speaker: 'B', text: 'Hej', overrides: {} },
+      { speaker: 'B', text: 'dalej mówi B', overrides: {} },
+      { speaker: 'Anna Maria', text: 'Tak', overrides: {} },
     ])
+  })
+  it('reads per-line voice changes', () => {
+    const [line] = parseScript('B [+3, 1.2x, echo, loud, pause 0.5]: Serio?!')
+    expect(line).toEqual({ speaker: 'B', text: 'Serio?!', overrides: { pitch: 3, rate: 1.2, effect: 'echo', volume: 4, pause: 0.5 } })
+    expect(parseScript('A [fast, low, radio]: x')[0].overrides).toEqual({ rate: 1.25, pitch: -3, effect: 'radio' })
+    expect(parseScript('Time: 12:30 tomorrow')[0].speaker).toBe('Time')
   })
 })
