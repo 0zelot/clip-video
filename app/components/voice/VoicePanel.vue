@@ -27,7 +27,7 @@ const ui = useUiStore()
 const online = useOnline()
 
 const COLORS = ['#2ee6d6', '#ff7ab6', '#ffd166', '#8ab4ff', '#9dffb0', '#ff9f5a']
-const speakerDefaults = (s, i) => ({ pitch: 0, rate: 1, effect: 'none', mix: 0.8, volume: 0, open: false, color: COLORS[i % COLORS.length], ...s })
+const speakerDefaults = (s, i) => ({ pitch: 0, rate: 1, effect: 'none', mix: 0.8, volume: 0, sample: '', open: false, color: COLORS[i % COLORS.length], ...s })
 
 function load() {
   try {
@@ -131,12 +131,9 @@ function addLine(speaker) {
 
 const playingKey = ref(null)
 async function previewLine(line, index) {
-  if (playingKey.value === index) {
-    audio?.pause()
-    playingKey.value = null
-    return
-  }
+  if (playingKey.value === index) return stopPlayback()
   if (busy.value) return
+  stopPlayback()
   busy.value = true
   progress.value = { label: `Line ${index + 1}`, ratio: 0 }
   try {
@@ -152,7 +149,7 @@ async function previewLine(line, index) {
 }
 
 function play(wav, key) {
-  audio?.pause()
+  stopPlayback()
   audio = new Audio(URL.createObjectURL(wav))
   playingKey.value = key
   audio.onended = () => (playingKey.value = null)
@@ -163,14 +160,29 @@ const busy = ref(false)
 const progress = ref(null)
 let audio = null
 
+/** What a speaker says when tested: their own sample text, else their first line in the script. */
+function defaultSample(speaker) {
+  const line = lines.value.find((l) => speakerFor(l.speaker) === speaker && l.text)
+  if (line) return line.text
+  return speaker.voiceId.startsWith('pl') ? 'Cześć, tak brzmi mój głos.' : 'Hi, this is how I sound.'
+}
+
+function sampleFor(speaker) {
+  return speaker.sample?.trim() || defaultSample(speaker)
+}
+
+/** Speaks the sample with the speaker's current pitch, tempo, effect and volume. */
 async function testVoice(speaker) {
+  const key = `speaker-${speaker.name}`
+  if (playingKey.value === key) return stopPlayback()
   if (busy.value) return
+  stopPlayback()
   busy.value = true
   progress.value = { label: `Preparing ${speaker.name}…`, ratio: 0 }
   try {
     const wav = await speak(
       {
-        text: speaker.voiceId.startsWith('pl') ? 'Cześć, tak brzmi mój głos.' : 'Hi, this is how I sound.',
+        text: sampleFor(speaker),
         voiceId: speaker.voiceId,
         pitch: speaker.pitch,
         rate: speaker.rate,
@@ -181,7 +193,7 @@ async function testVoice(speaker) {
       onProgress,
     )
     stored.value = await storedVoices()
-    play(wav, `speaker-${speaker.name}`)
+    play(wav, key)
   } catch (error) {
     reportError(error)
   } finally {
@@ -189,6 +201,65 @@ async function testVoice(speaker) {
     progress.value = null
   }
 }
+
+/** Plays the whole dialogue in order (nothing is added to the timeline). */
+let dialogueToken = 0
+async function playDialogue() {
+  if (playingKey.value === 'all') return stopPlayback()
+  if (busy.value) return
+  const todo = lines.value.filter((l) => l.text)
+  if (!todo.length) return
+  stopPlayback()
+  const token = ++dialogueToken
+  playingKey.value = 'all'
+  busy.value = true
+  try {
+    // Generate everything first (cached afterwards), so playback has no gaps.
+    const wavs = []
+    for (let i = 0; i < todo.length; i++) {
+      progress.value = { label: `Preparing line ${i + 1} of ${todo.length}`, ratio: 0 }
+      wavs.push(await speak({ text: todo[i].text, ...settingsFor(todo[i]) }, onProgress))
+      if (token !== dialogueToken) return
+    }
+    stored.value = await storedVoices()
+    busy.value = false
+    progress.value = null
+    for (let i = 0; i < wavs.length; i++) {
+      if (token !== dialogueToken) return
+      const pause = (todo[i].overrides?.pause ?? 0) + (i > 0 ? state.gap : 0)
+      if (pause > 0) await new Promise((r) => setTimeout(r, pause * 1000))
+      if (token !== dialogueToken) return
+      currentLine.value = lines.value.indexOf(todo[i])
+      await new Promise((resolve) => {
+        audio = new Audio(URL.createObjectURL(wavs[i]))
+        audio.onended = resolve
+        audio.onerror = resolve
+        audio.onpause = resolve
+        void audio.play().catch(resolve)
+      })
+    }
+  } catch (error) {
+    reportError(error)
+  } finally {
+    if (token === dialogueToken) {
+      playingKey.value = null
+      currentLine.value = -1
+      busy.value = false
+      progress.value = null
+    }
+  }
+}
+
+const currentLine = ref(-1)
+
+function stopPlayback() {
+  dialogueToken++
+  audio?.pause()
+  audio = null
+  playingKey.value = null
+  currentLine.value = -1
+}
+onBeforeUnmount(stopPlayback)
 
 function onProgress(p) {
   progress.value = { ...progress.value, ratio: p.ratio, phase: p.phase }
@@ -207,6 +278,7 @@ function reportError(error) {
 
 async function generate() {
   if (busy.value || !projectStore.project) return
+  stopPlayback()
   const todo = lines.value.filter((l) => l.text)
   if (!todo.length) {
     ui.toast('Write at least one line', 'info')
@@ -277,7 +349,7 @@ async function generate() {
               <option v-for="v in voices" :key="v.id" :value="v.id">{{ v.label }} ({{ v.gender }}){{ stored.includes(v.id) ? ' ✓' : '' }}</option>
             </optgroup>
           </select>
-          <UiIconButton :icon="playingKey === `speaker-${speaker.name}` ? Square : Play" label="Test voice" size="sm" :disabled="busy" @click="testVoice(speaker)" />
+          <UiIconButton :icon="playingKey === `speaker-${speaker.name}` ? Square : Play" label="Listen to this voice" size="sm" :disabled="busy && playingKey !== `speaker-${speaker.name}`" @click="testVoice(speaker)" />
           <UiIconButton :icon="ChevronDown" :label="speaker.open ? 'Hide voice settings' : 'Voice settings'" size="sm" :class="speaker.open ? 'rotate-180' : ''" @click="speaker.open = !speaker.open" />
         </div>
         <p v-if="!speaker.open" class="mt-1 truncate pl-6 text-[11px] text-muted">
@@ -309,6 +381,24 @@ async function generate() {
             <UiSlider v-model="speaker.mix" label="Effect amount" :min="0" :max="1" :step="0.05" :disabled="speaker.effect === 'none'" :format="(v) => `${Math.round(v * 100)}%`" />
           </div>
           <UiSlider v-model="speaker.volume" label="Volume" :min="-18" :max="12" :step="1" :format="(v) => `${v > 0 ? '+' : ''}${v} dB`" />
+          <div class="rounded-lg bg-panel-3/50 p-2">
+            <label class="block">
+              <span class="label">Test text</span>
+              <input v-model="speaker.sample" class="field" :placeholder="defaultSample(speaker)" maxlength="300" />
+            </label>
+            <UiButton
+              size="sm"
+              block
+              class="mt-1.5"
+              :variant="playingKey === `speaker-${speaker.name}` ? 'secondary' : 'primary'"
+              :icon="playingKey === `speaker-${speaker.name}` ? Square : Play"
+              :disabled="busy && playingKey !== `speaker-${speaker.name}`"
+              @click="testVoice(speaker)"
+            >
+              {{ playingKey === `speaker-${speaker.name}` ? 'Stop' : 'Listen with these settings' }}
+            </UiButton>
+            <p class="mt-1 text-[10px] text-muted">Empty = {{ speaker.name }}'s first line from the script. Change pitch, tempo or the effect and listen again.</p>
+          </div>
           <div class="flex justify-between">
             <UiButton size="sm" variant="ghost" @click="addLine(speaker)">+ line for {{ speaker.name }}</UiButton>
             <UiButton v-if="state.speakers.length > 1" size="sm" variant="danger" :icon="Trash2" @click="state.speakers.splice(i, 1)">Remove</UiButton>
@@ -334,7 +424,7 @@ async function generate() {
 
     <!-- parsed dialogue -->
     <ol v-if="lines.length" class="space-y-1">
-      <li v-for="(line, i) in lines" :key="i" class="flex items-start gap-2 rounded-lg bg-panel-2 px-2 py-1.5">
+      <li v-for="(line, i) in lines" :key="i" class="flex items-start gap-2 rounded-lg px-2 py-1.5" :class="currentLine === i ? 'bg-accent/15 ring-1 ring-accent' : 'bg-panel-2'">
         <span class="mt-0.5 shrink-0 rounded px-1.5 text-[10px] font-bold text-black" :style="{ background: speakerFor(line.speaker)?.color }">{{ speakerFor(line.speaker)?.name }}</span>
         <span class="min-w-0 flex-1 text-xs leading-snug">
           {{ line.text }}
@@ -348,6 +438,14 @@ async function generate() {
     <UiSlider v-model="state.gap" label="Pause between lines" :min="0" :max="1.5" :step="0.05" :format="(v) => `${v.toFixed(2)} s`" />
     <UiSwitch v-model="state.withCaptions" label="Add captions for the lines" />
 
+    <UiButton
+      block
+      :icon="playingKey === 'all' ? Square : Play"
+      :disabled="!lines.length || (busy && playingKey !== 'all')"
+      @click="playDialogue"
+    >
+      {{ playingKey === 'all' ? 'Stop' : 'Listen to the whole dialogue' }}
+    </UiButton>
     <UiButton variant="primary" block :icon="busy ? Loader2 : Mic" :disabled="busy || !lines.length" @click="generate">
       {{ busy ? 'Working…' : 'Generate voice-over' }}
     </UiButton>

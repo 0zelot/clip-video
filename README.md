@@ -235,7 +235,12 @@ Open the **Voice** tab (*Voice AI* on a phone).
    Text in square brackets changes the voice of **just that line**: `+3` / `-2` (semitones), `high` / `low`, `1.2x`,
    `fast` / `slow`, any effect name, `loud` / `quiet`, `pause 1` (seconds of silence before the line). Lines without a
    name continue with the previous speaker; unknown names can be added with one click.
-3. The list under the script shows who says what - press ▶ next to a line to hear it with all its settings.
+3. **Listen before you generate:**
+   - in a speaker's settings type any **Test text** (or leave it empty to use that speaker's first line from the
+     script) and press **Listen with these settings** - change pitch, tempo or the effect and press it again;
+   - press ▶ next to a line in the list under the script to hear just that line, with its `[ … ]` changes;
+   - **Listen to the whole dialogue** plays all lines in order with the pauses (the line being spoken is highlighted).
+   Nothing is added to the timeline until you press *Generate*; speech is cached, so re-listening is instant.
 4. Choose the pause between lines and whether captions should be created, then press **Generate voice-over**.
 
 The lines are placed one after another from the playhead on a new audio track. Each voice (~20-60 MB) is downloaded once
