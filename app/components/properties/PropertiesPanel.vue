@@ -1,5 +1,5 @@
 <script setup>
-import { AudioLines, Captions, Clock, Copy, Image as ImageIcon, Scissors, Sparkles, Trash2, Type, Video } from 'lucide-vue-next'
+import { AudioLines, Captions, Clock, Copy, Image as ImageIcon, Droplets, Scissors, Sparkles, Trash2, Type, Video } from 'lucide-vue-next'
 import { locateItem } from '~/core/model/queries'
 import { hasAudio, isTextual, isVisualItem } from '~/core/model/types'
 import { formatDuration, itemEnd, sourceOut } from '~/core/time'
@@ -27,7 +27,9 @@ const icon = computed(() =>
         ? Type
         : item.value?.type === 'caption'
           ? Captions
-          : Video,
+          : item.value?.type === 'blur'
+            ? Droplets
+            : Video,
 )
 
 /** Mobile toolbar: only one section is shown in the bottom sheet. */
@@ -116,10 +118,12 @@ function setSourceIn(value) {
         <PropertiesSpeed v-if="(item.type === 'video' || item.type === 'audio') && show('speed')" :item="item" />
         <PropertiesTransform v-if="isVisualItem(item) && show('transform')" :item="item" />
         <PropertiesEffects v-if="(item.type === 'video' || item.type === 'image') && show('effects')" :item="item" />
+        <PropertiesBlur v-if="item.type === 'blur' && show('blur')" :item="item" />
         <PropertiesMotion v-if="(item.type === 'video' || item.type === 'image') && show('motion')" :item="item" />
+        <PropertiesClipAnimation v-if="(item.type === 'video' || item.type === 'image') && show('animation')" :item="item" />
         <PropertiesTransition v-if="(item.type === 'video' || item.type === 'image') && show('transition')" :item="item" />
         <PropertiesAudio v-if="hasAudio(item) && show('audio')" :item="item" />
-        <PropertiesSection v-if="item.type !== 'text' && item.type !== 'caption' && show('ai')" title="Smart tools (on-device AI)" :icon="Sparkles" :default-open="focus === 'ai'">
+        <PropertiesSection v-if="item.type !== 'text' && item.type !== 'caption' && item.type !== 'blur' && show('ai')" title="Smart tools (on-device AI)" :icon="Sparkles" :default-open="focus === 'ai'">
           <AiTools :item="item" />
         </PropertiesSection>
 

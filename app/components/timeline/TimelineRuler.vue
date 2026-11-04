@@ -36,6 +36,15 @@ const ticks = computed(() => {
       {{ tick.label }}
     </div>
     <div
+      v-for="marker in projectStore.project?.markers ?? []"
+      :key="marker.id"
+      class="pointer-events-none absolute top-0 bottom-0 w-0"
+      :style="{ left: `${marker.t * editor.zoom}px` }"
+    >
+      <div class="absolute top-0 -left-[5px] size-2.5 rotate-45 rounded-[2px]" :style="{ background: marker.color }" />
+      <div class="absolute top-2 bottom-0 left-0 w-px opacity-70" :style="{ background: marker.color }" />
+    </div>
+    <div
       v-if="editor.markIn !== null"
       class="pointer-events-none absolute top-0 bottom-0 w-0.5 bg-accent"
       :style="{ left: `${editor.markIn * editor.zoom}px` }"

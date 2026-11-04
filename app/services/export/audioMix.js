@@ -8,7 +8,7 @@
  */
 import { ALL_FORMATS, AudioBufferSink, BlobSource, Input } from 'mediabunny'
 import { projectDuration } from '../../core/model/queries'
-import { sourceOut } from '../../core/time'
+import { consumedAt, rampLengths, sourceOut } from '../../core/time'
 import { speedAndPitch, stretchAudioBuffer } from './timeStretch'
 import { ExportCancelledError } from './types'
 
@@ -61,6 +61,31 @@ async function decodeRange(ctx, blob, from, to, signal) {
   }
 }
 
+/** Timeline sub-ranges of a ramped clip: short slices in the ramps, one for the hold. */
+function rampSegments(item) {
+  const { rampIn, rampOut } = rampLengths(item)
+  const segments = []
+  const slice = (from, to) => {
+    const n = Math.max(1, Math.ceil((to - from) / 0.15))
+    for (let i = 0; i < n; i++) segments.push([from + ((to - from) * i) / n, from + ((to - from) * (i + 1)) / n])
+  }
+  if (rampIn > 0) slice(0, rampIn)
+  const holdEnd = item.duration - rampOut
+  if (holdEnd - rampIn > 1e-3) segments.push([rampIn, holdEnd])
+  if (rampOut > 0) slice(holdEnd, item.duration)
+  return segments
+}
+
+/** Copies [from, to) seconds of a buffer into a new buffer. */
+function sliceBuffer(ctx, buffer, from, to) {
+  const a = Math.max(0, Math.floor(from * buffer.sampleRate))
+  const b = Math.min(buffer.length, Math.ceil(to * buffer.sampleRate))
+  if (b - a < 16) return null
+  const out = ctx.createBuffer(buffer.numberOfChannels, b - a, buffer.sampleRate)
+  for (let c = 0; c < buffer.numberOfChannels; c++) out.copyToChannel(buffer.getChannelData(c).subarray(a, b), c)
+  return out
+}
+
 /**
  * @param {import('../../core/model/types').Project} project
  * @param {Record<string, Blob>} blobs
@@ -88,6 +113,37 @@ export async function mixProjectAudio(project, blobs, options = {}) {
     options.onProgress?.(done / (audible.length + 1))
     if (!buffer) continue
 
+    const end = item.start + item.duration
+    const volume = item.audio.volume
+    const gain = ctx.createGain()
+    gain.gain.setValueAtTime(item.audio.fadeIn > 0 ? 0 : volume, item.start)
+    if (item.audio.fadeIn > 0) gain.gain.linearRampToValueAtTime(volume, item.start + item.audio.fadeIn)
+    if (item.audio.fadeOut > 0) {
+      gain.gain.setValueAtTime(volume, Math.max(item.start, end - item.audio.fadeOut))
+      gain.gain.linearRampToValueAtTime(0, end)
+    }
+    gain.connect(ctx.destination)
+
+    if (item.speedRamp && !loops && !item.reversed) {
+      // Speed ramp: render short constant-speed slices that follow the curve.
+      for (const [a, b] of rampSegments(item)) {
+        const srcA = consumedAt(item, a)
+        const srcB = consumedAt(item, b)
+        const slice = sliceBuffer(ctx, buffer, srcA, srcB)
+        if (!slice) continue
+        const avg = (srcB - srcA) / Math.max(1e-6, b - a)
+        const { playbackRate, stretchFactor } = speedAndPitch(avg, item.audio.pitch)
+        const stretched = Math.abs(stretchFactor - 1) > 0.002 ? stretchAudioBuffer(ctx, slice, stretchFactor) : slice
+        const source = ctx.createBufferSource()
+        source.buffer = stretched
+        source.playbackRate.value = playbackRate
+        source.connect(gain)
+        source.start(item.start + a, 0)
+        source.stop(Math.min(end, item.start + b + 0.004))
+      }
+      continue
+    }
+
     // Speed changes keep the original pitch (time stretching), and an explicit
     // pitch shift is realised by stretching first and resampling afterwards.
     const { playbackRate, stretchFactor } = speedAndPitch(item.speed, item.audio.pitch)
@@ -96,16 +152,7 @@ export async function mixProjectAudio(project, blobs, options = {}) {
     const source = ctx.createBufferSource()
     source.buffer = buffer
     source.playbackRate.value = playbackRate
-    const gain = ctx.createGain()
-    const end = item.start + item.duration
-    const volume = item.audio.volume
-    gain.gain.setValueAtTime(item.audio.fadeIn > 0 ? 0 : volume, item.start)
-    if (item.audio.fadeIn > 0) gain.gain.linearRampToValueAtTime(volume, item.start + item.audio.fadeIn)
-    if (item.audio.fadeOut > 0) {
-      gain.gain.setValueAtTime(volume, Math.max(item.start, end - item.audio.fadeOut))
-      gain.gain.linearRampToValueAtTime(0, end)
-    }
-    source.connect(gain).connect(ctx.destination)
+    source.connect(gain)
     if (loops) {
       source.loop = true
       source.start(item.start, item.sourceIn % Math.max(buffer.duration, 1e-3))

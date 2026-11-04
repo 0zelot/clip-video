@@ -13,9 +13,9 @@ export const EPSILON = 1e-6
  */
 export function sourceTimeAt(item, timelineTime, assetDuration) {
   const local = Math.min(Math.max(timelineTime - item.start, 0), item.duration)
-  const consumed = local * item.speed
+  const consumed = consumedAt(item, local)
   if (item.reversed) {
-    return item.sourceIn + item.duration * item.speed - consumed
+    return item.sourceIn + sourceRange(item) - consumed
   }
   let t = item.sourceIn + consumed
   if (item.type === 'audio' && item.loop && assetDuration && assetDuration > 0) {
@@ -29,7 +29,93 @@ export function sourceTimeAt(item, timelineTime, assetDuration) {
  * @param {import('./model/types').TimedItem} item
  */
 export function sourceOut(item) {
-  return item.sourceIn + item.duration * item.speed
+  return item.sourceIn + sourceRange(item)
+}
+
+// ---------------------------------------------------------------------------
+// Smooth speed ramps
+//
+// A clip may ease from `speedRamp.from` to its main `speed` over `rampIn`
+// seconds (timeline time) and back over `rampOut` seconds. The easing is a
+// smoothstep, whose integral has a closed form, so source positions are exact.
+// ---------------------------------------------------------------------------
+
+const smooth = (u) => u * u * (3 - 2 * u)
+/** ∫₀ˣ smoothstep(u) du */
+const smoothIntegral = (x) => x * x * x - (x * x * x * x) / 2
+
+/** Ramp lengths actually used (they never exceed the clip). */
+export function rampLengths(item) {
+  const ramp = item.speedRamp
+  if (!ramp) return { rampIn: 0, rampOut: 0 }
+  let rampIn = Math.max(0, ramp.rampIn ?? 0)
+  let rampOut = Math.max(0, ramp.rampOut ?? 0)
+  const total = rampIn + rampOut
+  if (total > item.duration && total > 0) {
+    const k = item.duration / total
+    rampIn *= k
+    rampOut *= k
+  }
+  return { rampIn, rampOut }
+}
+
+/** Playback speed at an item-local time. */
+export function speedAt(item, local) {
+  const ramp = item.speedRamp
+  if (!ramp) return item.speed
+  const { rampIn, rampOut } = rampLengths(item)
+  const from = ramp.from ?? 1
+  if (rampIn > 0 && local < rampIn) return from + (item.speed - from) * smooth(Math.max(0, local / rampIn))
+  const outStart = item.duration - rampOut
+  if (rampOut > 0 && local > outStart) return item.speed + (from - item.speed) * smooth(Math.min(1, (local - outStart) / rampOut))
+  return item.speed
+}
+
+/** Source seconds consumed after `local` seconds of the clip. */
+export function consumedAt(item, local) {
+  const ramp = item.speedRamp
+  if (!ramp) return local * item.speed
+  const { rampIn, rampOut } = rampLengths(item)
+  const from = ramp.from ?? 1
+  const s = item.speed
+  const t = Math.min(Math.max(local, 0), item.duration)
+  const inPart = (x) => (rampIn > 0 ? from * x + (s - from) * rampIn * smoothIntegral(x / rampIn) : 0)
+  if (t <= rampIn) return inPart(t)
+  const atHold = inPart(rampIn)
+  const outStart = item.duration - rampOut
+  if (t <= outStart || rampOut <= 0) return atHold + s * (t - rampIn)
+  const v = (t - outStart) / rampOut
+  return atHold + s * (outStart - rampIn) + s * (t - outStart) + (from - s) * rampOut * smoothIntegral(v)
+}
+
+/** Length of the used source media. */
+export function sourceRange(item) {
+  return item.speedRamp ? consumedAt(item, item.duration) : item.duration * item.speed
+}
+
+/** Average speed of the clip (equals `speed` without a ramp). */
+export function effectiveSpeed(item) {
+  return item.speedRamp && item.duration > 0 ? sourceRange(item) / item.duration : item.speed
+}
+
+/**
+ * Timeline duration needed to play `range` source seconds at `speed` with
+ * ramps from/to `from`. Ramps are shortened when the clip is too short.
+ * @returns {{ duration: number, rampIn: number, rampOut: number }}
+ */
+export function durationForRamp(range, speed, from, rampIn, rampOut) {
+  let rIn = Math.max(0, rampIn)
+  let rOut = Math.max(0, rampOut)
+  const avg = (from + speed) / 2
+  let rampConsumed = (rIn + rOut) * avg
+  if (rampConsumed > range && rampConsumed > 0) {
+    const k = range / rampConsumed
+    rIn *= k
+    rOut *= k
+    rampConsumed = range
+  }
+  const hold = Math.max(0, (range - rampConsumed) / speed)
+  return { duration: rIn + hold + rOut, rampIn: rIn, rampOut: rOut }
 }
 
 /** @param {{ start: number, duration: number }} item */
@@ -55,7 +141,7 @@ export function maxDurationFor(item, asset) {
   if (item.type === 'audio' && item.loop) return Number.POSITIVE_INFINITY
   const srcDuration = asset?.duration
   if (!srcDuration) return Number.POSITIVE_INFINITY
-  return Math.max(0, (srcDuration - item.sourceIn) / item.speed)
+  return Math.max(0, (srcDuration - item.sourceIn) / effectiveSpeed(item))
 }
 
 /** Snap a time to the nearest frame boundary. */

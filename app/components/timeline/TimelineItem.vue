@@ -1,5 +1,6 @@
 <script setup>
-import { AudioLines, Captions, Image as ImageIcon, Lock, Shuffle, TriangleAlert, Type, Video } from 'lucide-vue-next'
+import { AudioLines, Captions, Diamond, Droplets, Image as ImageIcon, Lock, Shuffle, TriangleAlert, Type, Video } from 'lucide-vue-next'
+import { keyframeTimes } from '~/core/render/animate'
 import { getTrimBounds } from '~/core/operations/items'
 import { formatDuration } from '~/core/time'
 import { mediaLibrary } from '~/services/media/mediaLibrary'
@@ -51,17 +52,25 @@ const COLORS = {
   text: 'bg-clip-text/25 border-clip-text/70',
   caption: 'bg-clip-caption/25 border-clip-caption/70',
   video: 'bg-clip-video/25 border-clip-video/70',
+  blur: 'bg-warn/15 border-warn/60 border-dashed',
 }
-const ICONS = { audio: AudioLines, image: ImageIcon, text: Type, caption: Captions, video: Video }
+const ICONS = { audio: AudioLines, image: ImageIcon, text: Type, caption: Captions, video: Video, blur: Droplets }
 
 const colorClass = computed(() => COLORS[props.item.type] ?? COLORS.video)
 const icon = computed(() => ICONS[props.item.type] ?? Video)
 const label = computed(() =>
-  props.item.type === 'text' || props.item.type === 'caption' ? props.item.text || 'Text' : (props.item.name ?? asset.value?.name ?? 'Clip'),
+  props.item.type === 'text' || props.item.type === 'caption'
+    ? props.item.text || 'Text'
+    : props.item.type === 'blur'
+      ? props.item.name ?? 'Blur'
+      : (props.item.name ?? asset.value?.name ?? 'Clip'),
 )
-const speedBadge = computed(() =>
-  props.item.speed && Math.abs(props.item.speed - 1) > 0.001 ? `${Number(props.item.speed.toFixed(2))}×` : null,
-)
+const speedBadge = computed(() => {
+  const it = props.item
+  if (it.speedRamp) return `${Number(it.speedRamp.from.toFixed(2))}↗${Number(it.speed.toFixed(2))}×`
+  return it.speed && Math.abs(it.speed - 1) > 0.001 ? `${Number(it.speed.toFixed(2))}×` : null
+})
+const keys = computed(() => (props.item.keyframes ? keyframeTimes(props.item) : []))
 
 const showWaveform = computed(
   () => props.item.type === 'audio' || (props.item.type === 'video' && asset.value?.hasAudio && props.height >= 60),
@@ -212,6 +221,19 @@ function onPointerDown(e) {
     <div v-if="missing" class="absolute inset-0 flex items-center justify-center gap-1 bg-warn/20 text-[10px] text-warn">
       <TriangleAlert class="size-3" /> offline
     </div>
+
+    <!-- keyframes -->
+    <Diamond
+      v-for="k in keys"
+      :key="k"
+      class="pointer-events-none absolute bottom-0.5 z-20 size-2.5 -translate-x-1/2 fill-accent text-accent"
+      :style="{ left: `${(k / Math.max(1e-6, view.duration)) * 100}%` }"
+    />
+    <div
+      v-if="item.effectsRamp"
+      class="pointer-events-none absolute inset-y-0 left-0 right-0 z-[5]"
+      :style="{ background: `linear-gradient(90deg, transparent, rgba(46,230,214,.25) ${Math.min(50, (item.effectsRamp.rampIn / view.duration) * 100)}%, rgba(46,230,214,.25) ${100 - Math.min(50, (item.effectsRamp.rampOut / view.duration) * 100)}%, transparent)` }"
+    />
 
     <!-- transition marker -->
     <div

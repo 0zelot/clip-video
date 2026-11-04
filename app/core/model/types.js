@@ -288,8 +288,23 @@ export const PROJECT_SCHEMA_VERSION = 2
  * @returns {boolean} true for items drawn on the canvas
  */
 export function isVisualItem(item) {
-  return item.type === 'video' || item.type === 'image' || item.type === 'text' || item.type === 'caption'
+  return item.type === 'video' || item.type === 'image' || item.type === 'text' || item.type === 'caption' || item.type === 'blur'
 }
+
+/** Picture-carrying clips (video and photos/stickers). */
+export function isMediaVisual(item) {
+  return item.type === 'video' || item.type === 'image'
+}
+
+/**
+ * Blur / pixelate region: an adjustment clip that blurs whatever is below it.
+ * @typedef {object} BlurProps
+ * @property {'rect' | 'ellipse'} shape
+ * @property {'blur' | 'pixelate'} mode
+ * @property {number} amount 0..1
+ * @property {boolean} invert blur everything except the region
+ * @property {{ w: number, h: number }} size normalized to the canvas
+ */
 
 /**
  * @param {Item} item

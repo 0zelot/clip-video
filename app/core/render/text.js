@@ -11,6 +11,11 @@ import { fontStack } from '../model/defaults'
 const EASE_OUT = (p) => 1 - Math.pow(1 - p, 3)
 const EASE_OUT_BACK = (p) => 1 + 2.2 * Math.pow(p - 1, 3) + 1.2 * Math.pow(p - 1, 2)
 
+function hash01(a, b = 0) {
+  const x = Math.sin(a * 127.1 + b * 311.7) * 43758.5453
+  return x - Math.floor(x)
+}
+
 function clamp01(v) {
   return Math.min(1, Math.max(0, v))
 }
@@ -298,7 +303,19 @@ export function drawTextItem(ctx, item, canvas, localTime) {
         if (style.highlight === 'reveal') wordScale = 1 + (style.activeScale - 1) * (1 - EASE_OUT(progress)) * 0.6
       }
 
-      const wordCenterX = lineLeft + word.x + word.width / 2
+      // Looping text effects (wavy, shake, glitch jumps, flicker).
+      const effect = style.effect ?? 'none'
+      const frame = Math.floor(localTime * 15)
+      let effectX = 0
+      if (effect === 'wavy') wordOffsetY += Math.sin(localTime * 5 + word.index * 0.9) * resolved.fontSize * 0.12
+      if (effect === 'shake') {
+        effectX += (hash01(frame, word.index * 3 + 1) - 0.5) * resolved.fontSize * 0.08
+        wordOffsetY += (hash01(frame, word.index * 3 + 2) - 0.5) * resolved.fontSize * 0.08
+      }
+      if (effect === 'glitch' && hash01(frame, word.index + 50) > 0.82) effectX += (hash01(frame, word.index + 60) - 0.5) * resolved.fontSize * 0.5
+      if (effect === 'flicker' && hash01(Math.floor(localTime * 10), 70) > 0.8) ctx.globalAlpha *= 0.35
+
+      const wordCenterX = lineLeft + word.x + word.width / 2 + effectX
       ctx.translate(wordCenterX, baseline + wordOffsetY)
       if (wordScale !== 1) ctx.scale(wordScale, wordScale)
       const drawX = -word.width / 2
@@ -316,6 +333,35 @@ export function drawTextItem(ctx, item, canvas, localTime) {
           resolved.radius * 0.7,
         )
         ctx.fill()
+        ctx.restore()
+      }
+
+      // 3D extrusion: stacked copies in the shadow colour
+      if (effect === 'extrude') {
+        ctx.save()
+        ctx.fillStyle = style.shadow.color
+        const depth = Math.max(2, Math.round(resolved.fontSize * 0.09))
+        for (let d = depth; d > 0; d--) ctx.fillText(text, drawX + d * 0.7, d * 0.7)
+        ctx.restore()
+      }
+      // RGB split / glitch ghosts
+      if (effect === 'rgbSplit' || effect === 'glitch') {
+        const shift = resolved.fontSize * (effect === 'glitch' ? 0.03 + hash01(frame, 80) * 0.05 : 0.045)
+        ctx.save()
+        ctx.globalAlpha *= 0.85
+        ctx.fillStyle = '#00e5ff'
+        ctx.fillText(text, drawX - shift, 0)
+        ctx.fillStyle = '#ff2bd6'
+        ctx.fillText(text, drawX + shift, 0)
+        ctx.restore()
+      }
+      // second, outer outline
+      if (style.stroke2?.width > 0) {
+        ctx.save()
+        ctx.lineJoin = 'round'
+        ctx.lineWidth = (resolved.strokeWidth + style.stroke2.width * resolved.fontSize) * 2
+        ctx.strokeStyle = style.stroke2.color
+        ctx.strokeText(text, drawX, 0)
         ctx.restore()
       }
 
@@ -364,6 +410,8 @@ export function drawTextItem(ctx, item, canvas, localTime) {
       const activeFill = isActive && ['color', 'pop', 'bounce', 'scale', 'underline', 'reveal'].includes(style.highlight)
       if (activeFill) {
         ctx.fillStyle = style.activeColor
+      } else if (effect === 'rainbow') {
+        ctx.fillStyle = `hsl(${Math.round((localTime * 140 + word.index * 45) % 360)}, 95%, 62%)`
       } else if (style.gradientColor) {
         const gradient = ctx.createLinearGradient(0, -resolved.fontSize * 0.8, 0, resolved.fontSize * 0.15)
         gradient.addColorStop(0, style.color)

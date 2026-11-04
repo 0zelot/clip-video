@@ -1,5 +1,9 @@
+import { DEFAULT_IMAGE_DURATION, createBlurItem, createId, createItemFromAsset } from '~/core/model/defaults'
 import { locateItem } from '~/core/model/queries'
+import { resolveItemAt } from '~/core/render/animate'
 import { EPSILON, snapToFrame } from '~/core/time'
+import { renderSticker } from '~/services/elements/stickers'
+import { useMediaStore } from '~/stores/media'
 import { useEditorStore } from '~/stores/editor'
 import { useProjectStore } from '~/stores/project'
 import { useUiStore } from '~/stores/ui'
@@ -129,6 +133,117 @@ export function useEditorCommands() {
     },
 
     zoom: (factor) => editor.setZoom(editor.zoom * factor),
+
+    /**
+     * Places a photo / video / sticker as an overlay at the playhead (above the
+     * main video), ready to be moved and scaled on the preview.
+     */
+    addOverlay: (asset, options = {}) => {
+      if (!asset || (asset.kind !== 'image' && asset.kind !== 'video')) return null
+      const item = createItemFromAsset(asset, snapToFrame(now(), fps()))
+      if (asset.kind === 'image') item.duration = options.duration ?? DEFAULT_IMAGE_DURATION
+      item.transform.scale = options.scale ?? 0.45
+      const id = projectStore.insertOverlay(item, 'Add overlay')
+      if (id) {
+        editor.select([id])
+        refresh()
+      }
+      return id
+    },
+
+    /** Draws a built-in sticker, imports it once and adds it as an overlay. */
+    addSticker: async (def) => {
+      const project = projectStore.project
+      if (!project) return null
+      const media = useMediaStore()
+      const file = await renderSticker(def)
+      let asset = Object.values(project.assets).find((a) => !a.removed && a.kind === 'image' && a.name === file.name)
+      if (!asset) [asset] = await media.importFiles([file])
+      return asset ? commands.addOverlay(asset, { scale: def.value ? 0.3 : 0.4 }) : null
+    },
+
+    /** Adds a blur / pixelate region (or a background blur) at the playhead. */
+    addBlur: (options = {}) => {
+      const item = createBlurItem({ ...options, start: snapToFrame(now(), fps()), duration: Math.max(1, Math.min(5, projectStore.duration - now() || 3)) })
+      const id = projectStore.insertOverlay(item, 'Add blur', { directlyAboveMain: true })
+      if (id) {
+        editor.select([id])
+        editor.focusProperties('blur')
+        refresh()
+      }
+      return id
+    },
+
+    /** Inserts a 2-second still of the current frame of the selected (or top) video clip. */
+    freezeFrame: async (seconds = 2) => {
+      const project = projectStore.project
+      if (!project) return
+      const t = snapToFrame(now(), fps())
+      const selected = editor.selection.length === 1 ? locateItem(project, editor.selection[0]) : null
+      let target = selected?.item.type === 'video' && selected.item.start <= t && selected.item.start + selected.item.duration > t ? selected.item : null
+      if (!target) {
+        for (const track of project.tracks) {
+          if (track.kind !== 'visual' || track.hidden) continue
+          const hit = track.items.find((i) => i.type === 'video' && i.start <= t && i.start + i.duration > t)
+          if (hit) target = hit
+        }
+      }
+      if (!target) {
+        ui.toast('Put the playhead over a video clip first', 'info')
+        return
+      }
+      editor.engine?.pause()
+      seek(t)
+      await new Promise((r) => setTimeout(r, 350))
+      const video = editor.engine?.media.getVideo(target.id)
+      if (!video || video.readyState < 2 || !video.videoWidth) {
+        ui.toast('The frame is not ready yet - try again', 'info')
+        return
+      }
+      const canvas = document.createElement('canvas')
+      canvas.width = video.videoWidth
+      canvas.height = video.videoHeight
+      canvas.getContext('2d')?.drawImage(video, 0, 0)
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.92))
+      if (!blob) return
+      const media = useMediaStore()
+      const file = new File([blob], `Freeze ${t.toFixed(2)}s.jpg`, { type: 'image/jpeg', lastModified: Date.now() })
+      const [asset] = await media.importFiles([file])
+      if (!asset) return
+      const look = resolveItemAt(target, t - target.start)
+      const still = {
+        ...createItemFromAsset(asset, t),
+        duration: seconds,
+        name: 'Freeze frame',
+        transform: { ...look.transform },
+        fit: target.fit,
+        crop: { ...target.crop },
+        effects: { ...target.effects },
+        opacity: look.opacity,
+      }
+      const id = projectStore.insertFreezeFrame(target.id, t, still)
+      if (id) {
+        editor.select([id])
+        refresh()
+        ui.toast(`Freeze frame added (${seconds}s)`, 'success')
+      }
+    },
+
+    /** Adds a marker at the playhead (or removes the one that is there). */
+    toggleMarker: () => {
+      const project = projectStore.project
+      if (!project) return
+      const t = snapToFrame(now(), fps())
+      const existing = (project.markers ?? []).find((m) => Math.abs(m.t - t) < 0.5 / fps())
+      if (existing) projectStore.removeMarker(existing.id)
+      else projectStore.addMarker({ id: createId(), t, label: '', color: '#ffb547' })
+    },
+    jumpMarker: (direction) => {
+      const list = projectStore.project?.markers ?? []
+      const t = now()
+      const target = direction < 0 ? [...list].reverse().find((m) => m.t < t - 1e-3) : list.find((m) => m.t > t + 1e-3)
+      if (target) seek(target.t)
+    },
 
     addTrack: (kind) => projectStore.addTrack(kind),
 

@@ -7,10 +7,11 @@
  * samples inside a worker.
  */
 import { activeItemOnTrack } from '../model/queries'
-import { isTextual, isVisualItem } from '../model/types'
-import { sourceTimeAt } from '../time'
+import { isMediaVisual, isTextual, isVisualItem } from '../model/types'
+import { sourceTimeAt, speedAt } from '../time'
+import { effectsAt, resolveItemAt } from './animate'
 import { buildFilter, computeItemRect } from './layout'
-import { drawTextItem } from './text'
+import { animationState, drawTextItem } from './text'
 
 /**
  * @typedef {CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D} Ctx2D
@@ -131,13 +132,13 @@ export function collectVisualLayers(project, t) {
     if (transition && transition.kind !== 'none' && t < item.start + transition.duration) {
       const index = track.items.indexOf(item)
       const previous = track.items[index - 1]
-      if (previous && isVisualItem(previous) && Math.abs(previous.start + previous.duration - item.start) < 0.05) {
+      if (previous && (isMediaVisual(previous) || isTextual(previous)) && item.type !== 'blur' && Math.abs(previous.start + previous.duration - item.start) < 0.05) {
         // The outgoing clip keeps playing past its out point during the blend
         // (the frame provider clamps to the last available frame).
         const overshoot = t - item.start
         const prevSourceTime =
           previous.type === 'video'
-            ? sourceTimeAt(previous, previous.start + previous.duration) + overshoot * previous.speed
+            ? sourceTimeAt(previous, previous.start + previous.duration) + overshoot * speedAt(previous, previous.duration)
             : 0
         layer.transition = {
           kind: transition.kind,
@@ -209,6 +210,36 @@ function drawVignette(ctx, rect, amount) {
   ctx.fillRect(-rect.width / 2, -rect.height / 2, rect.width, rect.height)
 }
 
+/** Shape masks for picture-in-picture clips, centred at the origin. */
+function maskPath(ctx, mask, w, h) {
+  const m = Math.min(w, h)
+  switch (mask) {
+    case 'circle':
+      ctx.arc(0, 0, m / 2, 0, Math.PI * 2)
+      break
+    case 'oval':
+      ctx.ellipse(0, 0, w / 2, h / 2, 0, 0, Math.PI * 2)
+      break
+    case 'rounded': {
+      const r = m * 0.12
+      ctx.roundRect ? ctx.roundRect(-w / 2, -h / 2, w, h, r) : ctx.rect(-w / 2, -h / 2, w, h)
+      break
+    }
+    case 'square':
+      ctx.rect(-m / 2, -m / 2, m, m)
+      break
+    case 'heart': {
+      const s = m / 2
+      ctx.moveTo(0, s * 0.9)
+      ctx.bezierCurveTo(-s * 1.1, s * 0.1, -s * 0.9, -s * 0.95, 0, -s * 0.45)
+      ctx.bezierCurveTo(s * 0.9, -s * 0.95, s * 1.1, s * 0.1, 0, s * 0.9)
+      break
+    }
+    default:
+      ctx.rect(-w / 2, -h / 2, w, h)
+  }
+}
+
 function drawTint(ctx, rect, temperature) {
   ctx.globalCompositeOperation = 'soft-light'
   ctx.globalAlpha = Math.min(1, Math.abs(temperature) * 0.75)
@@ -238,16 +269,25 @@ function drawGrain(ctx, rect, amount, localTime) {
  * @returns {'ok' | 'pending' | 'missing'}
  */
 function drawMediaLayer(ctx, layer, provider, project, options, modifier = {}) {
-  const { item } = layer
-  const frame = provider.getFrame(item, layer.sourceTime)
+  const local = layer.localTime ?? 0
+  const item = resolveItemAt(layer.item, local)
+  const frame = provider.getFrame(layer.item, layer.sourceTime)
   if (frame === 'missing') return 'missing'
   if (!frame) return 'pending'
-  const alpha = (modifier.alpha ?? 1) * item.opacity
+  const { width: pw, height: ph } = project.settings
+  // Clip in/out animations (fade, pop, slide, …) shared with text.
+  const anim = item.animation ? animationState(item, local, ph) : null
+  const alpha = (modifier.alpha ?? 1) * item.opacity * (anim?.alpha ?? 1)
   if (alpha <= 0) return 'ok'
 
-  const { width: pw, height: ph } = project.settings
   const r = computeItemRect(item, frame.width, frame.height, pw, ph)
-  const motion = motionAt(item, layer.localTime ?? 0, pw, ph)
+  const motion = motionAt(item, local, pw, ph)
+  if (anim) {
+    motion.scale *= anim.scale
+    motion.translateX += anim.offsetX
+    motion.translateY += anim.offsetY
+  }
+  const effects = effectsAt(item, local)
   ctx.save()
   if (modifier.clipPath) {
     ctx.beginPath()
@@ -259,20 +299,30 @@ function drawMediaLayer(ctx, layer, provider, project, options, modifier = {}) {
     ctx.clip()
   }
   ctx.globalAlpha = Math.min(1, Math.max(0, alpha))
-  let filter = buildFilter(item.effects, options.scale)
+  if (item.blendMode && item.blendMode !== 'normal') ctx.globalCompositeOperation = item.blendMode
+  let filter = buildFilter(effects, options.scale)
+  const animBlur = anim?.blur ?? 0
+  if (animBlur > 0.3) filter = `${filter === 'none' ? '' : `${filter} `}blur(${animBlur * options.scale}px)`
   if (modifier.blur > 0.05) filter = `${filter === 'none' ? '' : `${filter} `}blur(${modifier.blur * options.scale}px)`
   if (modifier.brightness && modifier.brightness !== 1) filter = `${filter === 'none' ? '' : `${filter} `}brightness(${modifier.brightness})`
   if (filter !== 'none') ctx.filter = filter
   ctx.translate(r.cx + (modifier.translateX ?? 0) + motion.translateX, r.cy + (modifier.translateY ?? 0) + motion.translateY)
   if (modifier.rotate) ctx.rotate(modifier.rotate)
+  if (anim?.rotation) ctx.rotate(anim.rotation)
   if (r.rotation) ctx.rotate((r.rotation * Math.PI) / 180)
   const extra = (modifier.scale ?? 1) * motion.scale
   if (extra !== 1) ctx.scale(extra, extra)
   if (r.flipH || r.flipV) ctx.scale(r.flipH ? -1 : 1, r.flipV ? -1 : 1)
+  if (item.mask && item.mask !== 'none') {
+    ctx.beginPath()
+    maskPath(ctx, item.mask, r.width, r.height)
+    ctx.clip()
+  }
   ctx.drawImage(frame.image, r.sx, r.sy, r.sw, r.sh, -r.width / 2, -r.height / 2, r.width, r.height)
-  const fx = item.effects
+  const fx = effects
   if (fx.vignette > 0 || fx.temperature || fx.grain > 0) {
     ctx.filter = 'none'
+    ctx.globalCompositeOperation = 'source-over'
     if (fx.temperature) {
       ctx.save()
       drawTint(ctx, r, fx.temperature)
@@ -280,7 +330,7 @@ function drawMediaLayer(ctx, layer, provider, project, options, modifier = {}) {
     }
     if (fx.grain > 0) {
       ctx.save()
-      drawGrain(ctx, r, fx.grain, layer.localTime ?? 0)
+      drawGrain(ctx, r, fx.grain, local)
       ctx.restore()
     }
     if (fx.vignette > 0) drawVignette(ctx, r, fx.vignette)
@@ -457,12 +507,103 @@ function drawTransition(ctx, layer, provider, project, options, report) {
   }
 }
 
+let scratch = null
+function getScratch(w, h) {
+  if (!scratch) scratch = typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(w, h) : document.createElement('canvas')
+  if (scratch.width !== w || scratch.height !== h) {
+    scratch.width = w
+    scratch.height = h
+  }
+  return scratch
+}
+
+/** Path of a blur region in project coordinates (current transform = project space). */
+function blurRegionPath(ctx, item, pw, ph) {
+  const tr = item.transform
+  const w = Math.max(1, item.size.w * pw * tr.scale * (tr.scaleX ?? 1))
+  const h = Math.max(1, item.size.h * ph * tr.scale * (tr.scaleY ?? 1))
+  const cx = tr.x * pw
+  const cy = tr.y * ph
+  const rot = ((tr.rotation ?? 0) * Math.PI) / 180
+  if (item.shape === 'ellipse') {
+    ctx.ellipse(cx, cy, w / 2, h / 2, rot, 0, Math.PI * 2)
+  } else {
+    const cos = Math.cos(rot)
+    const sin = Math.sin(rot)
+    const corners = [
+      [-w / 2, -h / 2],
+      [w / 2, -h / 2],
+      [w / 2, h / 2],
+      [-w / 2, h / 2],
+    ].map(([x, y]) => [cx + x * cos - y * sin, cy + x * sin + y * cos])
+    ctx.moveTo(corners[0][0], corners[0][1])
+    for (let i = 1; i < 4; i++) ctx.lineTo(corners[i][0], corners[i][1])
+    ctx.closePath()
+  }
+}
+
+/**
+ * Blurs or pixelates what has been drawn so far inside (or, inverted,
+ * outside) the region of a blur clip - for faces, number plates or a blurred
+ * background behind the subject.
+ */
+function drawBlurLayer(ctx, layer, project, options) {
+  const item = resolveItemAt(layer.item, layer.localTime ?? 0)
+  const canvas = ctx.canvas
+  if (!canvas || !item.size) return
+  const { width: pw, height: ph } = project.settings
+  const amount = Math.min(1, Math.max(0, item.amount ?? 0.5))
+  const strength = item.opacity ?? 1
+  if (amount <= 0 || strength <= 0) return
+  ctx.save()
+  ctx.beginPath()
+  if (item.invert) ctx.rect(0, 0, pw, ph)
+  blurRegionPath(ctx, item, pw, ph)
+  ctx.clip(item.invert ? 'evenodd' : 'nonzero')
+  ctx.globalAlpha = Math.min(1, strength)
+  if (item.mode === 'pixelate') {
+    const block = Math.max(2, Math.round(Math.min(canvas.width, canvas.height) * (0.008 + amount * 0.06)))
+    const sw = Math.max(1, Math.round(canvas.width / block))
+    const sh = Math.max(1, Math.round(canvas.height / block))
+    const tmp = getScratch(sw, sh)
+    const tctx = tmp.getContext('2d')
+    if (tctx) {
+      tctx.imageSmoothingEnabled = true
+      tctx.clearRect(0, 0, sw, sh)
+      tctx.drawImage(canvas, 0, 0, sw, sh)
+      ctx.imageSmoothingEnabled = false
+      ctx.drawImage(tmp, 0, 0, sw, sh, 0, 0, pw, ph)
+    }
+  } else {
+    const radius = (2 + amount * 38) * options.scale * (Math.min(pw, ph) / 1080)
+    ctx.filter = `blur(${radius}px)`
+    // Drawing the canvas onto itself works on a copy of the current pixels.
+    // Without inversion only the region's bounding box (plus the blur reach)
+    // is processed - much cheaper on phones.
+    if (item.invert) {
+      ctx.drawImage(canvas, 0, 0, canvas.width, canvas.height, 0, 0, pw, ph)
+    } else {
+      const tr = item.transform
+      const half = Math.hypot(item.size.w * pw * tr.scale * (tr.scaleX ?? 1), item.size.h * ph * tr.scale * (tr.scaleY ?? 1)) / 2
+      const margin = radius / options.scale * 2
+      const x0 = Math.max(0, tr.x * pw - half - margin)
+      const y0 = Math.max(0, tr.y * ph - half - margin)
+      const x1 = Math.min(pw, tr.x * pw + half + margin)
+      const y1 = Math.min(ph, tr.y * ph + half + margin)
+      const s = options.scale
+      if (x1 > x0 && y1 > y0) ctx.drawImage(canvas, x0 * s, y0 * s, (x1 - x0) * s, (y1 - y0) * s, x0, y0, x1 - x0, y1 - y0)
+    }
+  }
+  ctx.restore()
+}
+
 /** Draws a text or caption layer (optionally faded by a transition). */
 function drawTextLayer(ctx, layer, project, modifier = {}) {
-  const { item } = layer
+  const item = resolveItemAt(layer.item, layer.localTime ?? 0)
   const alpha = modifier.alpha ?? 1
   ctx.save()
   if (alpha < 1) ctx.globalAlpha = alpha
+  if (item.blendMode && item.blendMode !== 'normal') ctx.globalCompositeOperation = item.blendMode
   if (modifier.translateX || modifier.translateY) ctx.translate(modifier.translateX ?? 0, modifier.translateY ?? 0)
   drawTextItem(ctx, item, project.settings, layer.localTime)
   ctx.restore()
@@ -490,6 +631,10 @@ export function renderFrame(ctx, project, time, provider, options) {
     layer.localTime = time - layer.item.start
     if (layer.transition) {
       drawTransition(ctx, layer, provider, project, options, report)
+      continue
+    }
+    if (layer.item.type === 'blur') {
+      drawBlurLayer(ctx, layer, project, options)
       continue
     }
     if (isTextual(layer.item)) {

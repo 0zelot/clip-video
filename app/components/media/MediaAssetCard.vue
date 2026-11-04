@@ -1,5 +1,6 @@
 <script setup>
 import { AudioLines, EllipsisVertical, HardDriveDownload, Image as ImageIcon, Link2, Plus, Trash2, TriangleAlert } from 'lucide-vue-next'
+import { Layers } from 'lucide-vue-next'
 import { countAssetUsage } from '~/core/model/queries'
 import { formatDuration } from '~/core/time'
 import { mediaAnalysis } from '~/services/media/analysis'
@@ -18,6 +19,7 @@ const projectStore = useProjectStore()
 const media = useMediaStore()
 const editor = useEditorStore()
 const ui = useUiStore()
+const commands = useEditorCommands()
 
 const canvas = ref(null)
 const menu = ref({ open: false, x: 0, y: 0 })
@@ -74,6 +76,9 @@ async function remove() {
 
 const entries = computed(() => [
   { label: 'Add to timeline', icon: Plus, disabled: status.value !== 'ready', run: addToTimeline },
+  ...(props.asset.kind === 'image' || props.asset.kind === 'video'
+    ? [{ label: 'Add as overlay (on top)', icon: Layers, disabled: status.value !== 'ready', run: () => { commands.addOverlay(props.asset); editor.mobilePanel = null } }]
+    : []),
   { label: status.value === 'missing' ? 'Re-link file…' : 'Replace file…', icon: Link2, run: relink },
   { separator: true },
   { label: 'Remove from project', icon: Trash2, danger: true, run: remove },

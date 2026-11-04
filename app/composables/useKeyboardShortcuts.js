@@ -23,6 +23,9 @@ export const SHORTCUTS = [
   { group: 'Editing', keys: ['I', 'O'], description: 'Set In / Out point' },
   { group: 'Editing', keys: ['Shift', 'Delete'], description: 'Ripple-delete In→Out range' },
   { group: 'Editing', keys: ['N'], description: 'Toggle snapping' },
+  { group: 'Editing', keys: ['M'], description: 'Add / remove a marker' },
+  { group: 'Editing', keys: ['F'], description: 'Freeze frame (2 s still)' },
+  { group: 'Playback', keys: ['[', ']'], description: 'Previous / next marker' },
   { group: 'Project', keys: ['Ctrl', 'Z'], description: 'Undo' },
   { group: 'Project', keys: ['Ctrl', 'Shift', 'Z'], description: 'Redo' },
   { group: 'Project', keys: ['Ctrl', 'Y'], description: 'Redo' },
@@ -105,6 +108,20 @@ export function useKeyboardShortcuts() {
         case 'ArrowRight':
           if (e.shiftKey) commands.seekBy(1)
           else commands.stepFrames(1)
+          break
+        case 'm':
+        case 'M':
+          commands.toggleMarker()
+          break
+        case 'f':
+        case 'F':
+          void commands.freezeFrame()
+          break
+        case '[':
+          commands.jumpMarker(-1)
+          break
+        case ']':
+          commands.jumpMarker(1)
           break
         case 'j':
         case 'J':

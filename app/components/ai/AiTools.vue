@@ -6,6 +6,7 @@
  */
 import { AudioWaveform, Captions, Eraser, Loader2, Scissors, Wand2 } from 'lucide-vue-next'
 import { autoEnhanceFromPixels, dbToAmplitude, detectSilences } from '~/core/analysis/smart'
+import { effectiveSpeed } from '~/core/time'
 import { removeBackground } from '~/services/ai/backgroundRemoval'
 import { mediaAnalysis } from '~/services/media/analysis'
 import { mediaLibrary } from '~/services/media/mediaLibrary'
@@ -55,12 +56,14 @@ const silences = computed(() => {
   const p = peaks.value
   if (!item || !p || !hasSound.value || item.reversed) return []
   const from = item.sourceIn
-  const to = item.sourceIn + item.duration * item.speed
+  // Ramped clips are treated with their average speed (close enough for pauses).
+  const speed = effectiveSpeed(item)
+  const to = item.sourceIn + item.duration * speed
   const ranges = detectSilences(p.data, p.bucketsPerSecond, from, to, {
     threshold: dbToAmplitude(thresholdDb.value),
     minSilence: minPause.value,
   })
-  return ranges.map(([a, b]) => [item.start + (a - from) / item.speed, item.start + (b - from) / item.speed])
+  return ranges.map(([a, b]) => [item.start + (a - from) / speed, item.start + (b - from) / speed])
 })
 const silentSeconds = computed(() => silences.value.reduce((sum, [a, b]) => sum + (b - a), 0))
 

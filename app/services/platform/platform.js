@@ -24,3 +24,8 @@ export function isTouchDevice() {
 export function isMac() {
   return typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
 }
+
+/** True inside the Electron desktop app. */
+export function isDesktopApp() {
+  return typeof window !== 'undefined' && !!window.clipDesktop?.isDesktop
+}

@@ -39,27 +39,49 @@ function previewFilter(preset) {
 
 const hasRange = computed(() => editor.markIn !== null && editor.markOut !== null && editor.markOut > editor.markIn)
 
-/** Applies the current look to the In→Out range only (splitting the clip). */
-function applyToRange() {
+const rangeEase = ref(0.5)
+
+/**
+ * Turns the In→Out range into its own clip whose effects fade in and out
+ * gradually; the sliders then edit just that part.
+ */
+function editRange() {
   if (!hasRange.value) {
     ui.toast('Set an In point (I) and an Out point (O) first', 'info')
     return
   }
-  const snapshot = { ...effects.value }
+  const from = { ...effects.value }
+  const ease = rangeEase.value
   const ids = projectStore.applyToRange(
     editor.markIn,
     editor.markOut,
     [props.item.id],
     (draft, id) => {
       const item = draft.tracks.flatMap((t) => t.items).find((i) => i.id === id)
-      if (item && item.effects) item.effects = { ...snapshot }
+      if (!item || !item.effects) return
+      if (ease > 0) item.effectsRamp = { from, rampIn: ease, rampOut: ease }
+      else delete item.effectsRamp
     },
     'Effects on range',
   )
   if (ids.length) {
     editor.select(ids)
-    ui.toast('Applied the effects to the selected range', 'success')
+    editor.markIn = null
+    editor.markOut = null
+    ui.toast('Now adjust the look - it applies to the range only' + (ease > 0 ? `, fading over ${ease}s` : ''), 'success')
   }
+}
+
+const ramp = computed(() => props.item.effectsRamp ?? null)
+function setRamp(patch) {
+  const current = ramp.value ?? { from: neutralEffects(), rampIn: 0.5, rampOut: 0.5 }
+  projectStore.setEffectsRamp(props.item.id, { ...current, ...patch })
+  editor.engine?.refresh()
+}
+function toggleRamp(on) {
+  if (on) setRamp({ from: neutralEffects(), rampIn: 0.5, rampOut: 0.5 })
+  else projectStore.setEffectsRamp(props.item.id, null)
+  editor.engine?.refresh()
 }
 
 const sliders = [
@@ -113,9 +135,22 @@ function formatValue(slider, value) {
       @update:model-value="(v) => set({ [slider.key]: v }, `fx:${slider.key}:${item.id}`)"
     />
 
-    <div class="flex gap-1.5">
-      <UiButton size="sm" class="flex-1" @click="projectStore.setEffects(item.id, neutralEffects(), `reset:${item.id}`)">Reset</UiButton>
-      <UiButton size="sm" class="flex-1" :disabled="!hasRange" @click="applyToRange">Apply to In→Out</UiButton>
+    <UiButton size="sm" block @click="projectStore.setEffects(item.id, neutralEffects(), `reset:${item.id}`)">Reset effects</UiButton>
+
+    <div class="rounded-xl border border-line bg-panel-2/60 p-2.5">
+      <UiSwitch :model-value="!!ramp" label="Fade the look in / out" @update:model-value="toggleRamp" />
+      <div v-if="ramp" class="grid grid-cols-2 gap-2">
+        <UiNumberField :model-value="ramp.rampIn" label="Fade in" :min="0" :max="10" :step="0.1" :precision="2" suffix="s" @commit="(v) => setRamp({ rampIn: v })" />
+        <UiNumberField :model-value="ramp.rampOut" label="Fade out" :min="0" :max="10" :step="0.1" :precision="2" suffix="s" @commit="(v) => setRamp({ rampOut: v })" />
+      </div>
+      <p v-if="ramp" class="mt-1.5 text-[11px] text-muted">The colours change gradually from the {{ item.effectsRamp?.from && Object.keys(item.effectsRamp.from).length ? 'original' : 'natural' }} look and back.</p>
+    </div>
+
+    <div class="rounded-xl border border-line bg-panel-2/60 p-2.5">
+      <p class="mb-1.5 text-xs font-medium">Only a part of the clip</p>
+      <UiSlider v-model="rangeEase" label="Gradual change" :min="0" :max="2" :step="0.05" :format="(v) => (v > 0 ? `${v.toFixed(2)} s` : 'instant')" />
+      <UiButton size="sm" block class="mt-1" :disabled="!hasRange" @click="editRange">Edit the In→Out range only</UiButton>
+      <p class="mt-1.5 text-[11px] text-muted">{{ hasRange ? 'The range becomes its own clip; brightness, colours, blur… then fade in and out over the chosen time.' : 'Mark a range with In and Out on the timeline first.' }}</p>
     </div>
   </PropertiesSection>
 </template>

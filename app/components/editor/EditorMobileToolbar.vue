@@ -24,6 +24,14 @@ import {
   Trash2,
   Type,
   Wand2,
+  Mic,
+  Shapes,
+  Droplets,
+  Snowflake,
+  Bookmark,
+  Clapperboard,
+  Blend,
+  Diamond,
 } from 'lucide-vue-next'
 import { locateItem } from '~/core/model/queries'
 import { hasAudio } from '~/core/model/types'
@@ -71,9 +79,14 @@ const tools = computed(() => {
       { id: 'library', label: 'Library', icon: Film, run: () => library('media') },
       { id: 'audio', label: 'Audio', icon: Music, run: () => importMedia('audio/*,.mp3,.m4a,.wav,.aac,.ogg,.opus,.flac') },
       { id: 'text', label: 'Text', icon: Type, run: () => library('text') },
+      { id: 'elements', label: 'Stickers', icon: Shapes, run: () => library('elements') },
+      { id: 'voice', label: 'Voice AI', icon: Mic, run: () => library('voice') },
       { id: 'captions', label: 'Captions', icon: Captions, run: () => library('captions') },
+      { id: 'blur', label: 'Blur', icon: Droplets, run: () => commands.addBlur({ mode: 'blur' }) },
       { id: 'ai', label: 'Smart AI', icon: Sparkles, run: () => library('ai') },
       { id: 'split', label: 'Split', icon: Scissors, run: () => commands.split() },
+      { id: 'freeze', label: 'Freeze', icon: Snowflake, run: () => commands.freezeFrame() },
+      { id: 'marker', label: 'Marker', icon: Bookmark, run: () => commands.toggleMarker() },
       { id: 'project', label: 'Format', icon: Info, run: () => (editor.mobilePanel = editor.mobilePanel === 'project' ? null : 'project') },
     ]
   }
@@ -85,7 +98,23 @@ const tools = computed(() => {
     { id: 'all', label: 'All settings', icon: SlidersHorizontal, run: () => open(null) },
   ]
   if (it.type === 'text' || it.type === 'caption') {
-    return [back, { id: 'text', label: it.type === 'caption' ? 'Caption' : 'Edit text', icon: Type, run: () => open('text') }, { id: 'pos', label: 'Position', icon: Move, run: () => open('transform') }, { id: 'timing', label: 'Duration', icon: Timer, run: () => open('timing') }, ...common]
+    return [
+      back,
+      { id: 'text', label: it.type === 'caption' ? 'Caption' : 'Edit text', icon: Type, run: () => open('text') },
+      { id: 'opacity', label: 'Opacity', icon: Blend, run: () => open('transform') },
+      { id: 'keys', label: 'Keyframes', icon: Diamond, run: () => open('transform') },
+      { id: 'timing', label: 'Duration', icon: Timer, run: () => open('timing') },
+      ...common,
+    ]
+  }
+  if (it.type === 'blur') {
+    return [
+      back,
+      { id: 'blur', label: 'Blur', icon: Droplets, run: () => open('blur') },
+      { id: 'keys', label: 'Track it', icon: Diamond, run: () => open('transform') },
+      { id: 'timing', label: 'Duration', icon: Timer, run: () => open('timing') },
+      ...common,
+    ]
   }
   if (it.type === 'audio') {
     return [back, { id: 'speed', label: 'Speed', icon: Gauge, run: () => open('speed') }, { id: 'volume', label: 'Volume', icon: AudioLines, run: () => open('audio') }, { id: 'ai', label: 'Smart AI', icon: Sparkles, run: () => open('ai') }, { id: 'timing', label: 'Duration', icon: Timer, run: () => open('timing') }, ...common]
@@ -95,10 +124,14 @@ const tools = computed(() => {
     ...(it.type === 'video' ? [{ id: 'speed', label: 'Speed', icon: Gauge, run: () => open('speed') }] : []),
     ...(hasAudio(it) ? [{ id: 'volume', label: 'Volume', icon: AudioLines, run: () => open('audio') }] : []),
     { id: 'effects', label: 'Filters', icon: Wand2, run: () => open('effects') },
+    { id: 'opacity', label: 'Opacity', icon: Blend, run: () => open('transform') },
+    { id: 'anim', label: 'Animate', icon: Clapperboard, run: () => open('animation') },
     { id: 'motion', label: 'Motion', icon: Move, run: () => open('motion') },
+    { id: 'keys', label: 'Keyframes', icon: Diamond, run: () => open('transform') },
     { id: 'transition', label: 'Transition', icon: Shuffle, run: () => open('transition') },
     { id: 'crop', label: 'Crop & fit', icon: Crop, run: () => open('transform') },
     { id: 'ai', label: 'Smart AI', icon: Sparkles, run: () => open('ai') },
+    ...(it.type === 'video' ? [{ id: 'freeze', label: 'Freeze', icon: Snowflake, run: () => commands.freezeFrame() }] : []),
     { id: 'timing', label: 'Duration', icon: Timer, run: () => open('timing') },
     ...common,
   ]

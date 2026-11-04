@@ -1,6 +1,8 @@
 <script setup>
 import { Maximize2, Minus, Plus, RotateCcw, RotateCw } from 'lucide-vue-next'
 import { collectVisualLayers, renderFrame } from '~/core/render/compositor'
+import { hitTest } from '~/core/render/bounds'
+import { previewInteraction } from '~/composables/usePreviewInteraction'
 import { isTextual } from '~/core/model/types'
 import { formatTimecode } from '~/core/time'
 import { mediaLibrary } from '~/services/media/mediaLibrary'
@@ -120,7 +122,7 @@ function draw() {
   // loads (clips without any snapshot yet, e.g. right after import).
   const pending = collectVisualLayers(project, time)
     .flatMap((l) => (l.transition ? [l, l.transition.previous] : [l]))
-    .filter((l) => !isTextual(l.item))
+    .filter((l) => !isTextual(l.item) && l.item.type !== 'blur')
     .some((l) => provider.getFrame(l.item, l.sourceTime) === null)
   if (pending && performance.now() - lastGoodDraw < (engine.playing ? 1500 : 600)) {
     scheduleRetry(40)
@@ -216,6 +218,7 @@ function onPointerDown(e) {
   if (e.button !== undefined && e.button > 0) return
   // Moving / scaling the selected clip is handled by the overlay.
   if (e.target instanceof Element && e.target.closest('[data-preview-handle]')) return
+  if (previewInteraction.itemPointers > 0) return
   pointers.set(e.pointerId, localPoint(e))
   try {
     wrapper.value?.setPointerCapture(e.pointerId)
@@ -305,7 +308,26 @@ function onPointerUp(e) {
   handleTap(g.start)
 }
 
+let hitCtx = null
+/** Tapping a clip on the preview selects it (like in mobile editors). */
+function selectAt(point) {
+  const project = projectStore.project
+  if (!project || surface.value.width === 0) return false
+  const left = (box.value.width - surface.value.width) / 2 + pan.value.x
+  const top = (box.value.height - surface.value.height) / 2 + pan.value.y
+  const scale = project.settings.width / surface.value.width
+  const x = (point.x - left) * scale
+  const y = (point.y - top) * scale
+  if (!hitCtx) hitCtx = document.createElement('canvas').getContext('2d')
+  const hit = hitTest(project, editor.currentTime(), x, y, hitCtx)
+  if (!hit) return false
+  if (editor.selection.length === 1 && editor.selection[0] === hit.id) return false
+  editor.select([hit.id])
+  return true
+}
+
 function handleTap(point) {
+  if (!editor.playing && selectAt(point)) return
   const width = box.value.width || 1
   const side = point.x < width * 0.3 ? -1 : point.x > width * 0.7 ? 1 : 0
   const now = performance.now()

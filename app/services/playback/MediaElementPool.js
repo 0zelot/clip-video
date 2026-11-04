@@ -1,6 +1,6 @@
 import { activeItemOnTrack } from '../../core/model/queries'
 import { collectVisualLayers } from '../../core/render/compositor'
-import { sourceTimeAt } from '../../core/time'
+import { sourceTimeAt, speedAt } from '../../core/time'
 import { mediaLibrary } from '../media/mediaLibrary'
 
 const MAX_IDLE_MS = 8000
@@ -195,7 +195,9 @@ export class MediaElementPool {
 
       el.muted = !audible
       el.volume = Math.min(1, Math.max(0, item.audio.volume * masterVolume))
-      if (el.playbackRate !== item.speed) el.playbackRate = item.speed
+      // Speed ramps change the rate continuously; small steps avoid constant resets.
+      const rate = Math.min(16, Math.max(0.0625, Math.round(speedAt(item, Math.max(0, time - item.start)) * 100) / 100))
+      if (Math.abs(el.playbackRate - rate) > 0.004) el.playbackRate = rate
       // Speed changes must not change the pitch of the preview.
       if ('preservesPitch' in el) el.preservesPitch = true
 

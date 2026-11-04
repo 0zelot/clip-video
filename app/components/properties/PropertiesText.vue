@@ -1,6 +1,6 @@
 <script setup>
 import { Bold, Italic, Sparkles, Type, Upload } from 'lucide-vue-next'
-import { CAPTION_HIGHLIGHTS, SYSTEM_FONTS, TEXT_ANIMATIONS, TEXT_PRESETS } from '~/core/model/defaults'
+import { CAPTION_HIGHLIGHTS, SYSTEM_FONTS, TEXT_ANIMATIONS, TEXT_EFFECTS, TEXT_PRESETS } from '~/core/model/defaults'
 import { textPreviewStyle } from '~/composables/useTextPreview'
 import { useCaptionsStore } from '~/stores/captions'
 import { useEditorStore } from '~/stores/editor'
@@ -174,6 +174,22 @@ const HIGHLIGHTS = CAPTION_HIGHLIGHTS
     </div>
   </PropertiesSection>
 
+  <PropertiesSection title="Effect" :icon="Sparkles">
+    <div class="grid grid-cols-4 gap-1">
+      <button
+        v-for="option in TEXT_EFFECTS"
+        :key="option.id"
+        type="button"
+        class="h-8 rounded-lg border text-[11px] coarse:h-10"
+        :class="(style.effect ?? 'none') === option.id ? 'border-accent bg-accent/10 text-accent' : 'border-line text-muted hover:border-subtle'"
+        @click="setStyle({ effect: option.id })"
+      >
+        {{ option.label }}
+      </button>
+    </div>
+    <p class="text-[11px] text-muted">3D uses the shadow colour for the extrusion.</p>
+  </PropertiesSection>
+
   <PropertiesSection title="Outline, shadow & box" :icon="Sparkles" :default-open="false">
     <div class="grid grid-cols-2 gap-2">
       <label class="block">
@@ -188,6 +204,22 @@ const HIGHLIGHTS = CAPTION_HIGHLIGHTS
         :step="0.005"
         :format="(v) => `${Math.round(v * 100)}`"
         @update:model-value="(v) => setNested('stroke', { width: v }, `sw:${item.id}`)"
+      />
+    </div>
+
+    <div class="grid grid-cols-2 gap-2">
+      <label class="block">
+        <span class="label">2nd outline</span>
+        <input type="color" class="h-9 w-full cursor-pointer rounded-lg border border-line bg-panel-2" :value="style.stroke2?.color ?? '#ffffff'" @input="setNested('stroke2', { color: $event.target.value }, `s2c:${item.id}`)" />
+      </label>
+      <UiSlider
+        :model-value="style.stroke2?.width ?? 0"
+        label="Outer width"
+        :min="0"
+        :max="0.3"
+        :step="0.005"
+        :format="(v) => `${Math.round(v * 100)}`"
+        @update:model-value="(v) => setNested('stroke2', { width: v }, `s2w:${item.id}`)"
       />
     </div>
 

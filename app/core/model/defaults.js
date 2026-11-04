@@ -109,6 +109,7 @@ export function createProject(name, settings = {}) {
     settings: defaultSettings(settings),
     assets: {},
     tracks: [createTrack('visual', 'Video 1'), createTrack('audio', 'Audio 1')],
+    markers: [],
     savedTextStyles: [],
     savedCaptionStyles: [],
   }
@@ -248,6 +249,10 @@ export function defaultTextStyle(overrides = {}) {
     gradientColor: null,
     /** Draws only the stroke (hollow letters). */
     outlineOnly: false,
+    /** Second, outer outline. */
+    stroke2: { color: '#ffffff', width: 0 },
+    /** Looping effect: none | wavy | shake | glitch | rgbSplit | extrude | rainbow | flicker */
+    effect: 'none',
     ...overrides,
   }
 }
@@ -621,6 +626,100 @@ export const CAPTION_PRESETS = [
     position: { x: 0.5, y: 0.78 },
   },
 ]
+
+const T = (overrides, animIn = 'pop', duration = 0.3) => ({
+  style: defaultTextStyle(overrides),
+  animation: defaultTextAnimation({ in: { kind: animIn, duration } }),
+})
+
+TEXT_PRESETS.push(
+  { id: 'double-outline', label: 'Double outline', ...T({ fontFamily: 'Arial Black', fontWeight: 900, fontSize: 0.07, uppercase: true, color: '#ffffff', stroke: { color: '#ff2b6a', width: 0.1 }, stroke2: { color: '#ffffff', width: 0.08 }, shadow: { color: '#000000', blur: 0.2, offsetX: 0, offsetY: 0.06, opacity: 0.6 } }) },
+  { id: 'comic', label: 'Comic', ...T({ fontFamily: 'Comic Sans MS', fontWeight: 900, fontSize: 0.07, color: '#ffe14d', stroke: { color: '#000000', width: 0.12 }, stroke2: { color: '#ff3b5c', width: 0.08 }, effect: 'none' }, 'bounce', 0.4) },
+  { id: 'glitch', label: 'Glitch', ...T({ fontFamily: 'Impact', fontWeight: 400, fontSize: 0.075, uppercase: true, color: '#ffffff', effect: 'glitch', shadow: { color: '#000000', blur: 0, offsetX: 0, offsetY: 0, opacity: 0 } }, 'zoom', 0.25) },
+  { id: 'rgb', label: 'RGB split', ...T({ fontFamily: 'Arial Black', fontWeight: 900, fontSize: 0.068, uppercase: true, color: '#ffffff', effect: 'rgbSplit' }, 'blur', 0.4) },
+  { id: '3d', label: '3D block', ...T({ fontFamily: 'Impact', fontWeight: 400, fontSize: 0.085, uppercase: true, color: '#ffde3b', effect: 'extrude', stroke: { color: '#1a1a1a', width: 0.04 }, shadow: { color: '#c2410c', blur: 0, offsetX: 0, offsetY: 0, opacity: 0 } }, 'drop', 0.45) },
+  { id: 'rainbow', label: 'Rainbow', ...T({ fontWeight: 900, fontSize: 0.07, uppercase: true, effect: 'rainbow', stroke: { color: '#000000', width: 0.1 } }, 'wave', 0.6) },
+  { id: 'wavy', label: 'Wavy', ...T({ fontFamily: 'Trebuchet MS', fontWeight: 800, fontSize: 0.065, color: '#9dffb0', effect: 'wavy', stroke: { color: '#06331a', width: 0.1 } }, 'wave', 0.6) },
+  { id: 'shaky', label: 'Shaky', ...T({ fontFamily: 'Impact', fontWeight: 400, fontSize: 0.08, uppercase: true, color: '#ff3b3b', effect: 'shake', stroke: { color: '#000000', width: 0.12 } }, 'zoom', 0.2) },
+  { id: 'flicker', label: 'Neon flicker', ...T({ fontFamily: 'Futura', fontWeight: 600, color: '#ff4fd8', effect: 'flicker', shadow: { color: '#ff4fd8', blur: 0.9, offsetX: 0, offsetY: 0, opacity: 1 }, stroke2: { color: '#ffffff', width: 0 } }, 'fade', 0.5) },
+  { id: 'sticker', label: 'Sticker', ...T({ fontFamily: 'Arial Black', fontWeight: 900, fontSize: 0.06, color: '#111111', stroke: { color: '#ffffff', width: 0.22 }, shadow: { color: '#000000', blur: 0.3, offsetX: 0.03, offsetY: 0.08, opacity: 0.5 } }, 'pop', 0.35) },
+  { id: 'handwritten', label: 'Handwritten', ...T({ fontFamily: 'Brush Script MT', fontWeight: 400, fontSize: 0.085, color: '#ffffff', shadow: { color: '#000000', blur: 0.25, offsetX: 0, offsetY: 0.04, opacity: 0.6 } }, 'typewriter', 0.9) },
+  { id: 'serif-gold', label: 'Gold serif', ...T({ fontFamily: 'Palatino', fontWeight: 700, fontSize: 0.065, color: '#fff3b0', gradientColor: '#c9971c', letterSpacing: 0.06, uppercase: true, shadow: { color: '#000000', blur: 0.35, offsetX: 0, offsetY: 0.04, opacity: 0.6 } }, 'blur', 0.6) },
+  { id: 'mono-tag', label: 'Code tag', ...T({ fontFamily: 'monospace', fontWeight: 700, fontSize: 0.042, color: '#3dff6e', background: { color: '#0b0f0c', opacity: 0.9, padding: 0.5, radius: 0.15 }, shadow: { color: '#000000', blur: 0, offsetX: 0, offsetY: 0, opacity: 0 } }, 'typewriter', 0.8) },
+  { id: 'highlighter', label: 'Highlighter', ...T({ fontFamily: 'Rockwell', fontWeight: 700, fontSize: 0.05, color: '#111111', background: { color: '#fff23d', opacity: 1, padding: 0.3, radius: 0.05 }, shadow: { color: '#000000', blur: 0, offsetX: 0, offsetY: 0, opacity: 0 } }, 'slideLeft', 0.3) },
+  { id: 'cinema', label: 'Cinema title', ...T({ fontFamily: 'Times New Roman', fontWeight: 400, fontSize: 0.06, letterSpacing: 0.3, uppercase: true, color: '#f5f0e6', shadow: { color: '#000000', blur: 0.5, offsetX: 0, offsetY: 0, opacity: 0.6 } }, 'blur', 1.2) },
+  { id: 'red-box', label: 'Breaking', ...T({ fontFamily: 'Arial Black', fontWeight: 900, fontSize: 0.05, uppercase: true, color: '#ffffff', background: { color: '#e11d2e', opacity: 1, padding: 0.4, radius: 0 }, shadow: { color: '#000000', blur: 0, offsetX: 0.04, offsetY: 0.04, opacity: 1 } }, 'slideLeft', 0.3) },
+)
+
+CAPTION_PRESETS.push(
+  { id: 'rainbow', label: 'Rainbow', style: defaultCaptionStyle({ highlight: 'scale', effect: 'rainbow', fontWeight: 900, stroke: { color: '#000000', width: 0.14 } }), animation: defaultTextAnimation({ in: { kind: 'pop', duration: 0.15 }, out: { kind: 'none', duration: 0 } }), position: { x: 0.5, y: 0.74 } },
+  { id: 'wavy', label: 'Wavy', style: defaultCaptionStyle({ highlight: 'color', effect: 'wavy', activeColor: '#7dfcff', fontFamily: 'Trebuchet MS', stroke: { color: '#000000', width: 0.12 } }), animation: defaultTextAnimation({ in: { kind: 'fade', duration: 0.12 }, out: { kind: 'none', duration: 0 } }), position: { x: 0.5, y: 0.76 } },
+  { id: 'comic', label: 'Comic', style: defaultCaptionStyle({ highlight: 'bounce', fontFamily: 'Comic Sans MS', fontWeight: 900, color: '#ffffff', activeColor: '#ffe14d', stroke: { color: '#000000', width: 0.12 }, stroke2: { color: '#ff3b5c', width: 0.06 } }), animation: defaultTextAnimation({ in: { kind: 'pop', duration: 0.18 }, out: { kind: 'none', duration: 0 } }), position: { x: 0.5, y: 0.74 } },
+  { id: 'glitch', label: 'Glitch', style: defaultCaptionStyle({ highlight: 'color', effect: 'glitch', fontFamily: 'Impact', fontWeight: 400, fontSize: 0.065, activeColor: '#00e5ff', stroke: { color: '#000000', width: 0.1 } }), animation: defaultTextAnimation({ in: { kind: 'zoom', duration: 0.12 }, out: { kind: 'none', duration: 0 } }), position: { x: 0.5, y: 0.72 } },
+  { id: '3d', label: '3D', style: defaultCaptionStyle({ highlight: 'pop', effect: 'extrude', fontFamily: 'Impact', fontWeight: 400, fontSize: 0.07, color: '#ffffff', activeColor: '#ffde3b', stroke: { color: '#000000', width: 0.05 }, shadow: { color: '#7c2d12', blur: 0, offsetX: 0, offsetY: 0, opacity: 0 } }), animation: defaultTextAnimation({ in: { kind: 'pop', duration: 0.15 }, out: { kind: 'none', duration: 0 } }), position: { x: 0.5, y: 0.72 } },
+  { id: 'serif', label: 'Serif', style: defaultCaptionStyle({ highlight: 'underline', uppercase: false, fontFamily: 'Georgia', fontWeight: 700, activeColor: '#ffd166', stroke: { color: '#000000', width: 0.06 } }), animation: defaultTextAnimation({ in: { kind: 'fade', duration: 0.15 }, out: { kind: 'none', duration: 0 } }), position: { x: 0.5, y: 0.8 } },
+)
+
+/** Looping text effects. */
+export const TEXT_EFFECTS = [
+  { id: 'none', label: 'None' },
+  { id: 'wavy', label: 'Wavy' },
+  { id: 'shake', label: 'Shake' },
+  { id: 'glitch', label: 'Glitch' },
+  { id: 'rgbSplit', label: 'RGB split' },
+  { id: 'extrude', label: '3D' },
+  { id: 'rainbow', label: 'Rainbow' },
+  { id: 'flicker', label: 'Flicker' },
+]
+
+/** Blend modes for overlays (canvas composite operations). */
+export const BLEND_MODES = [
+  { id: 'normal', label: 'Normal' },
+  { id: 'multiply', label: 'Multiply' },
+  { id: 'screen', label: 'Screen' },
+  { id: 'overlay', label: 'Overlay' },
+  { id: 'darken', label: 'Darken' },
+  { id: 'lighten', label: 'Lighten' },
+  { id: 'color-dodge', label: 'Colour dodge' },
+  { id: 'soft-light', label: 'Soft light' },
+  { id: 'difference', label: 'Difference' },
+  { id: 'luminosity', label: 'Luminosity' },
+]
+
+/** Enter/exit animations for video and photo clips. */
+export const CLIP_ANIMATIONS = [
+  { id: 'none', label: 'None' },
+  { id: 'fade', label: 'Fade' },
+  { id: 'pop', label: 'Pop' },
+  { id: 'zoom', label: 'Zoom' },
+  { id: 'slide', label: 'Slide up' },
+  { id: 'slideLeft', label: 'Slide side' },
+  { id: 'rise', label: 'Rise' },
+  { id: 'drop', label: 'Drop' },
+  { id: 'blur', label: 'Blur' },
+  { id: 'spin', label: 'Spin' },
+  { id: 'bounce', label: 'Bounce' },
+]
+
+/**
+ * @param {{ start?: number, duration?: number, mode?: 'blur' | 'pixelate', invert?: boolean, shape?: 'rect' | 'ellipse' }} [options]
+ */
+export function createBlurItem(options = {}) {
+  return {
+    id: createId(),
+    type: 'blur',
+    name: options.mode === 'pixelate' ? 'Pixelate' : options.invert ? 'Background blur' : 'Blur',
+    start: options.start ?? 0,
+    duration: options.duration ?? DEFAULT_TEXT_DURATION,
+    shape: options.shape ?? 'ellipse',
+    mode: options.mode ?? 'blur',
+    amount: 0.5,
+    invert: !!options.invert,
+    size: options.invert ? { w: 0.6, h: 0.45 } : { w: 0.35, h: 0.2 },
+    transform: defaultTransform(),
+    opacity: 1,
+  }
+}
 
 /** Text enter/exit animations. */
 export const TEXT_ANIMATIONS = [

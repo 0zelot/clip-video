@@ -1,7 +1,8 @@
 <script setup>
 import { Gauge, Timer } from 'lucide-vue-next'
 import { MAX_SPEED, MIN_SPEED, SPEED_PRESETS } from '~/core/model/defaults'
-import { formatDuration, speedForDuration } from '~/core/time'
+import { durationForRamp, formatDuration, sourceRange as rangeOf, speedForDuration } from '~/core/time'
+import { setItemSpeed } from '~/core/operations/items'
 import { useEditorStore } from '~/stores/editor'
 import { useProjectStore } from '~/stores/project'
 import { useUiStore } from '~/stores/ui'
@@ -14,8 +15,10 @@ const ui = useUiStore()
 const fps = computed(() => projectStore.project?.settings.fps ?? 30)
 const speed = computed(() => props.item.speed)
 /** Length of the used source media (does not change with speed). */
-const sourceRange = computed(() => props.item.duration * props.item.speed)
-const speedLabel = computed(() => `${Number(speed.value.toFixed(3))}×`)
+const sourceRange = computed(() => rangeOf(props.item))
+const ramp = computed(() => props.item.speedRamp ?? null)
+const fmt = (v) => `${Number(v.toFixed(3))}×`
+const speedLabel = computed(() => fmt(speed.value))
 
 function setSpeed(value) {
   const next = Math.min(MAX_SPEED, Math.max(MIN_SPEED, value))
@@ -25,7 +28,20 @@ function setSpeed(value) {
 
 /** "This part should last N seconds" - the speed follows. */
 function setTargetDuration(seconds) {
-  const next = speedForDuration(sourceRange.value, seconds)
+  let next = speedForDuration(sourceRange.value, seconds)
+  if (next !== null && ramp.value) {
+    // With a ramp the relation is not linear: find the main speed by bisection.
+    const r = ramp.value
+    let lo = MIN_SPEED
+    let hi = MAX_SPEED
+    for (let i = 0; i < 60; i++) {
+      const mid = (lo + hi) / 2
+      const d = durationForRamp(sourceRange.value, mid, r.from, r.rampIn, r.rampOut).duration
+      if (d > seconds) lo = mid
+      else hi = mid
+    }
+    next = (lo + hi) / 2
+  }
   if (next === null) return
   if (next < MIN_SPEED || next > MAX_SPEED) {
     ui.toast(`That needs ${Number(next.toFixed(2))}× - speed is limited to ${MIN_SPEED}×–${MAX_SPEED}×`, 'warning')
@@ -52,28 +68,46 @@ function nudge(delta) {
 
 const hasRange = computed(() => editor.markIn !== null && editor.markOut !== null && editor.markOut > editor.markIn)
 
-/** Splits the clip at the In/Out marks and speeds up only that part. */
+// ----- smooth ramps -----------------------------------------------------------
+
+const rangeEase = ref(0.5)
+
+function setRamp(patch) {
+  const current = ramp.value ?? { from: 1, rampIn: 0.5, rampOut: 0.5 }
+  const next = { ...current, ...patch }
+  projectStore.setSpeedRamp(props.item.id, speed.value, next.rampIn > 0 || next.rampOut > 0 ? next : null)
+  editor.engine?.refresh()
+}
+
+function toggleRamp(on) {
+  if (on) setRamp({ from: 1, rampIn: 0.5, rampOut: 0.5 })
+  else projectStore.setSpeedRamp(props.item.id, speed.value, null)
+  editor.engine?.refresh()
+}
+
+/**
+ * Splits the clip at the In/Out marks and changes the speed of only that
+ * part - easing into and out of the new speed instead of jumping.
+ */
 function applyToRange(value) {
   if (!hasRange.value) {
     ui.toast('Set an In point (I) and an Out point (O) on the timeline first', 'info')
     return
   }
+  const from = speed.value
+  const ease = rangeEase.value
   const ids = projectStore.applyToRange(
     editor.markIn,
     editor.markOut,
     [props.item.id],
-    (draft, id) => {
-      const item = draft.tracks.flatMap((t) => t.items).find((i) => i.id === id)
-      if (!item || (item.type !== 'video' && item.type !== 'audio')) return
-      const range = item.duration * item.speed
-      item.speed = value
-      item.duration = Math.max(1 / 30, range / value)
-    },
+    (draft, id) => setItemSpeed(draft, id, value, { ramp: ease > 0 ? { from, rampIn: ease, rampOut: ease } : null }),
     `Speed ${Number(value.toFixed(3))}×`,
   )
   if (ids.length) {
     editor.select(ids)
-    ui.toast(`Applied ${Number(value.toFixed(3))}× to the selected range`, 'success')
+    editor.markIn = null
+    editor.markOut = null
+    ui.toast(`${fmt(value)} on the range${ease > 0 ? ` with ${ease}s easing` : ''} - adjust it here`, 'success')
     editor.engine?.refresh()
   }
 }
@@ -153,12 +187,31 @@ function applyToRange(value) {
       <p class="mt-1.5 text-[11px] text-muted">Type a length (e.g. <span class="font-mono">7.5</span> or <span class="font-mono">0:12.10</span>) and the speed is calculated for you.</p>
     </div>
 
-    <UiButton size="sm" block :disabled="!hasRange" @click="applyToRange(speed === 1 ? 2 : speed)">
-      Apply {{ speed === 1 ? '2×' : speedLabel }} to In→Out range
-    </UiButton>
-    <p class="text-[11px] text-muted">
-      {{ hasRange ? 'The clip is split at the marks and only that part changes speed.' : 'Mark a range with In and Out to change the speed of just a part of the clip.' }}
-      Pitch stays natural.
-    </p>
+    <!-- smooth ramp of this clip -->
+    <div class="rounded-xl border border-line bg-panel-2/60 p-2.5">
+      <UiSwitch :model-value="!!ramp" label="Ease in / out (speed ramp)" @update:model-value="toggleRamp" />
+      <template v-if="ramp">
+        <p class="mb-2 font-mono text-[11px] text-accent">{{ fmt(ramp.from) }} → {{ speedLabel }} → {{ fmt(ramp.from) }}</p>
+        <div class="grid grid-cols-3 gap-2">
+          <UiNumberField :model-value="ramp.from" label="Edge speed" :min="MIN_SPEED" :max="MAX_SPEED" :step="0.05" :precision="2" suffix="×" @commit="(v) => setRamp({ from: v })" />
+          <UiNumberField :model-value="ramp.rampIn" label="Ease in" :min="0" :max="10" :step="0.1" :precision="2" suffix="s" @commit="(v) => setRamp({ rampIn: v })" />
+          <UiNumberField :model-value="ramp.rampOut" label="Ease out" :min="0" :max="10" :step="0.1" :precision="2" suffix="s" @commit="(v) => setRamp({ rampOut: v })" />
+        </div>
+        <p class="mt-1.5 text-[11px] text-muted">The clip starts at the edge speed, glides to {{ speedLabel }} and glides back.</p>
+      </template>
+    </div>
+
+    <!-- part of the clip -->
+    <div class="rounded-xl border border-line bg-panel-2/60 p-2.5">
+      <p class="mb-1.5 text-xs font-medium">Only a part of the clip</p>
+      <UiSlider v-model="rangeEase" label="Gradual change" :min="0" :max="2" :step="0.05" :format="(v) => (v > 0 ? `${v.toFixed(2)} s` : 'instant')" />
+      <UiButton size="sm" block class="mt-1" :disabled="!hasRange" @click="applyToRange(speed === 1 ? 2 : speed)">
+        {{ speed === 1 ? '2×' : speedLabel }} on the In→Out range
+      </UiButton>
+      <p class="mt-1.5 text-[11px] text-muted">
+        {{ hasRange ? 'The range becomes its own clip that speeds up gradually and slows back down - fine-tune it afterwards.' : 'Mark a range with In and Out on the timeline first.' }}
+        Pitch stays natural.
+      </p>
+    </div>
   </PropertiesSection>
 </template>
