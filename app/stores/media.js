@@ -85,7 +85,8 @@ export const useMediaStore = defineStore('media', () => {
    * `addToTimeline` is set, placed on the timeline one after another.
    *
    * @param {File[]} files
-   * @param {{ addToTimeline?: boolean, hint?: import('~/core/operations/items').PlacementHint }} [options]
+   * @param {{ addToTimeline?: boolean, hint?: import('~/core/operations/items').PlacementHint, credit?: import('~/core/model/types').AssetCredit }} [options]
+   *   `credit`: author / licence of downloaded stock media, kept on the asset
    * @returns {Promise<import('~/core/model/types').MediaAsset[]>}
    */
   async function importFiles(files, options = {}) {
@@ -139,6 +140,7 @@ export const useMediaStore = defineStore('media', () => {
           hasAudio: probe.hasAudio,
           hasVideo: probe.hasVideo,
           importedAt: Date.now(),
+          ...(options.credit ? { credit: options.credit } : {}),
         }
         asset.storage = await storeBlob(asset, file)
         mediaLibrary.register(asset.id, asset.kind, file, { fontFamily: asset.fontFamily })

@@ -137,6 +137,14 @@ describe('transitions & effects', () => {
     const loaded = normalizeProject(JSON.parse(JSON.stringify(p)))
     expect(loaded.tracks[0].items[0].motion).toEqual({ kind: 'panLeft', amount: 1 })
   })
+  it('keeps the voice-over dialogue per project through save / load', () => {
+    const p = createProject('With dialogue')
+    p.voiceover = { speakers: [{ name: 'A', voiceId: 'pl_PL-gosia-medium' }], script: 'A: Cześć', gap: 0.25, withCaptions: true }
+    expect(normalizeProject(JSON.parse(JSON.stringify(p))).voiceover).toEqual(p.voiceover)
+    // A new project has no dialogue of its own.
+    expect(normalizeProject(createProject('Fresh')).voiceover).toBeUndefined()
+    expect(normalizeProject({ ...createProject('Broken'), voiceover: 'nope' }).voiceover).toBeUndefined()
+  })
   it('suggests brighter settings for dark footage', () => {
     const dark = new Uint8ClampedArray(64 * 4).map((_, i) => (i % 4 === 3 ? 255 : 30 + (i % 7)))
     const fix = autoEnhanceFromPixels(dark)

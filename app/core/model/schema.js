@@ -188,5 +188,6 @@ export function normalizeProject(raw) {
           .map((m) => ({ id: typeof m.id === 'string' ? m.id : createId(), t: Math.max(0, m.t), label: typeof m.label === 'string' ? m.label : '', color: typeof m.color === 'string' ? m.color : '#ffb547' }))
           .sort((a, b) => a.t - b.t)
       : [],
+    ...(raw.voiceover && typeof raw.voiceover === 'object' && Array.isArray(raw.voiceover.speakers) ? { voiceover: raw.voiceover } : {}),
   }
 }

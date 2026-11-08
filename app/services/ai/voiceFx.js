@@ -4,6 +4,7 @@
  * Everything is rendered offline into a new WAV, so the result sounds the same
  * in the preview and in the export.
  */
+import { parseTime } from '../../core/time'
 import { speedAndPitch, stretchAudioBuffer } from '../export/timeStretch'
 
 /** @typedef {'none' | 'radio' | 'telephone' | 'megaphone' | 'robot' | 'alien' | 'echo' | 'hall' | 'cave' | 'underwater' | 'monster' | 'whisper'} VoiceEffect */
@@ -261,8 +262,9 @@ const EFFECT_IDS = new Set(VOICE_EFFECTS.map((e) => e.id))
 
 /**
  * Per-line overrides written in square brackets after the speaker name, e.g.
- * `A [+3, 1.2x, echo, loud, pause 1]: text`.
- * @returns {{ pitch?: number, rate?: number, effect?: VoiceEffect, volume?: number, pause?: number }}
+ * `A [+3, 1.2x, echo, loud, pause 1]: text`, or `A [at 1:02.5]: text` to
+ * place the line at that time of the video (voice-over of its speech).
+ * @returns {{ pitch?: number, rate?: number, effect?: VoiceEffect, volume?: number, pause?: number, at?: number }}
  */
 export function parseOverrides(text) {
   const out = {}
@@ -270,7 +272,10 @@ export function parseOverrides(text) {
     const token = raw.trim().toLowerCase()
     if (!token) continue
     let m
-    if ((m = /^([+-]\d+(?:\.\d+)?)\s*(?:st|semitones?)?$/.exec(token))) out.pitch = Number(m[1])
+    if ((m = /^(?:at|@)\s*(\d[\d:.]*)$/.exec(token))) {
+      const at = parseTime(m[1])
+      if (at !== null) out.at = at
+    } else if ((m = /^([+-]\d+(?:\.\d+)?)\s*(?:st|semitones?)?$/.exec(token))) out.pitch = Number(m[1])
     else if ((m = /^(?:x\s*)?(\d+(?:\.\d+)?)\s*x$/.exec(token)) || (m = /^x\s*(\d+(?:\.\d+)?)$/.exec(token))) out.rate = Number(m[1])
     else if ((m = /^(?:pause|wait|gap)\s*(\d+(?:\.\d+)?)\s*s?$/.exec(token))) out.pause = Number(m[1])
     else if (token === 'fast') out.rate = 1.25
@@ -282,4 +287,27 @@ export function parseOverrides(text) {
     else if (EFFECT_IDS.has(token)) out.effect = token
   }
   return out
+}
+
+/** Writes a time for an `at` override: 75.25 -> "1:15.25". */
+export function formatAt(seconds) {
+  const s = Math.max(0, seconds)
+  const m = Math.floor(s / 60)
+  const rest = (s - m * 60).toFixed(2).padStart(5, '0')
+  return `${m}:${rest}`
+}
+
+/** Duration of a 16-bit PCM WAV blob in seconds (reads only its header). */
+export async function wavDuration(blob) {
+  const view = new DataView(await blob.slice(0, 256).arrayBuffer())
+  const tag = (o) => String.fromCharCode(view.getUint8(o), view.getUint8(o + 1), view.getUint8(o + 2), view.getUint8(o + 3))
+  let byteRate = 0
+  for (let o = 12; o + 8 <= view.byteLength; ) {
+    const id = tag(o)
+    const size = view.getUint32(o + 4, true)
+    if (id === 'fmt ') byteRate = view.getUint32(o + 16, true)
+    if (id === 'data') return byteRate ? (blob.size - (o + 8)) / byteRate : 0
+    o += 8 + size + (size % 2)
+  }
+  return 0
 }

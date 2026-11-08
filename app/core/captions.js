@@ -66,6 +66,20 @@ export function distributeWords(text, start, end) {
 }
 
 /**
+ * Groups word timestamps into whole sentences - the lines of a voice-over.
+ * A sentence also ends at a pause in the speech or after ~10 s.
+ *
+ * @param {{ text: string, start: number, end: number }[]} words
+ * @returns {{ start: number, end: number, text: string }[]}
+ */
+export function wordsToSentences(words) {
+  return wordsToPhrases(words, { maxWords: 60, maxChars: 240, maxDuration: 10, maxGap: 0.9 })
+    .map(({ start, end, text }) => ({ start, end, text }))
+    // Recognition of music or noise yields lines like "..." or "♪" - nothing to read out.
+    .filter((s) => /\p{L}/u.test(s.text))
+}
+
+/**
  * Groups word timestamps (e.g. from speech recognition) into short phrases.
  *
  * @param {{ text: string, start: number, end: number }[]} words

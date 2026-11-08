@@ -151,7 +151,10 @@ function openMenu(e) {
     </div>
     <div class="flex items-center gap-1 py-1 pr-0.5 pl-2">
       <TriangleAlert v-if="status === 'missing'" class="size-3.5 shrink-0 text-warn" />
-      <p class="min-w-0 flex-1 truncate text-xs" :title="asset.name">{{ asset.name }}</p>
+      <div class="min-w-0 flex-1">
+        <p class="truncate text-xs" :title="asset.name">{{ asset.name }}</p>
+        <p v-if="asset.credit" class="truncate text-[10px] text-muted" :title="`${asset.credit.author} · ${asset.credit.license}`">{{ asset.credit.author }} · {{ asset.credit.license }}</p>
+      </div>
       <UiIconButton :icon="EllipsisVertical" label="Media actions" size="sm" @click="openMenu" />
     </div>
     <UiMenu :open="menu.open" :x="menu.x" :y="menu.y" :items="entries" @close="menu.open = false" />

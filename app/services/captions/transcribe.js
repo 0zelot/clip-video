@@ -11,11 +11,16 @@
  */
 import { decodeForSpeech } from './audioSource'
 
+// Word timing is computed from the decoder's cross-attentions, so these must be
+// the `_timestamped` exports: the plain `onnx-community/whisper-*` models do not
+// output attentions and fail with "Model outputs must contain cross attentions".
 export const WHISPER_MODELS = [
-  { id: 'onnx-community/whisper-tiny', label: 'Tiny · fastest', size: '~45 MB' },
-  { id: 'onnx-community/whisper-base', label: 'Base · better quality', size: '~85 MB' },
-  { id: 'onnx-community/whisper-small', label: 'Small · best quality', size: '~250 MB' },
+  { id: 'onnx-community/whisper-tiny_timestamped', label: 'Tiny · fastest', size: '~45 MB' },
+  { id: 'onnx-community/whisper-base_timestamped', label: 'Base · better quality', size: '~85 MB' },
+  { id: 'onnx-community/whisper-small_timestamped', label: 'Small · best quality', size: '~250 MB' },
 ]
+
+const SAMPLE_RATE = 16000
 
 export const CAPTION_LANGUAGES = [
   { id: 'auto', label: 'Detect automatically' },
@@ -81,8 +86,8 @@ export function canTranscribe() {
  * Transcribes a media file into word timestamps.
  *
  * @param {Blob} blob audio or video file
- * @param {{ model?: string, language?: string, onProgress?: (p: { phase: string, ratio: number }) => void, signal?: AbortSignal }} [options]
- * @returns {Promise<{ text: string, words: { text: string, start: number, end: number }[] }>}
+ * @param {{ model?: string, language?: string, task?: 'transcribe' | 'translate', onProgress?: (p: { phase: string, ratio: number }) => void, signal?: AbortSignal }} [options]
+ * @returns {Promise<{ text: string, words: { text: string, start: number, end: number }[], language: string | null }>}
  */
 export async function transcribeMedia(blob, options = {}) {
   const model = options.model ?? WHISPER_MODELS[0].id
@@ -98,12 +103,70 @@ export async function transcribeMedia(blob, options = {}) {
   const transcriber = await getTranscriber(model, (ratio) => report('model', ratio))
   if (options.signal?.aborted) throw new DOMException('Aborted', 'AbortError')
 
+  return transcribeSamples(transcriber, samples, { language: options.language, task: options.task, onProgress: options.onProgress })
+}
+
+/**
+ * Detects the spoken language the way Whisper does it: one decoder step after
+ * <|startoftranscript|> on 30 s of audio, then the most likely language token.
+ *
+ * transformers.js does not implement this - without an explicit language it
+ * silently assumes English, which turns e.g. Polish speech into English text.
+ *
+ * @param {*} transcriber an automatic-speech-recognition pipeline
+ * @param {Float32Array} samples mono audio at 16 kHz
+ * @returns {Promise<string | null>} language code such as 'pl', or null if unknown
+ */
+export async function detectLanguage(transcriber, samples) {
+  const { Tensor } = await import('@huggingface/transformers')
+  const { model, processor } = transcriber
+  const config = model.generation_config
+  const langToId = config?.lang_to_id
+  if (!config?.is_multilingual || !langToId) return null
+
+  // Skip leading silence so a quiet intro does not decide the language.
+  let start = samples.findIndex((s) => Math.abs(s) > 0.02)
+  start = Math.max(0, start - SAMPLE_RATE / 2)
+  const { input_features } = await processor(samples.subarray(start, start + 30 * SAMPLE_RATE))
+
+  const { logits } = await model({
+    input_features,
+    decoder_input_ids: new Tensor('int64', [BigInt(config.decoder_start_token_id)], [1, 1]),
+  })
+  // logits: [1, 1, vocab] - a single position, so the token id indexes it directly.
+  let best = null
+  let bestScore = -Infinity
+  for (const [token, id] of Object.entries(langToId)) {
+    if (logits.data[id] > bestScore) {
+      bestScore = logits.data[id]
+      best = token
+    }
+  }
+  return best ? best.slice(2, -2) : null // '<|pl|>' -> 'pl'
+}
+
+/**
+ * Runs Whisper on decoded audio and returns word timestamps.
+ *
+ * @param {*} transcriber an automatic-speech-recognition pipeline
+ * @param {Float32Array} samples mono audio at 16 kHz
+ * @param {{ language?: string, task?: 'transcribe' | 'translate', onProgress?: (p: { phase: string, ratio: number }) => void }} [options]
+ *   `task: 'translate'` returns the speech translated into English (Whisper does that itself)
+ * @returns {Promise<{ text: string, words: { text: string, start: number, end: number }[], language: string | null }>}
+ */
+export async function transcribeSamples(transcriber, samples, options = {}) {
+  const report = (phase, ratio) => options.onProgress?.({ phase, ratio })
+
   report('transcribing', 0)
+  let language = options.language && options.language !== 'auto' ? options.language : null
+  if (!language) language = await detectLanguage(transcriber, samples)
+
   const output = await transcriber(samples, {
     chunk_length_s: 30,
     stride_length_s: 5,
     return_timestamps: 'word',
-    ...(options.language && options.language !== 'auto' ? { language: options.language, task: 'transcribe' } : {}),
+    ...(language ? { language } : {}),
+    task: options.task === 'translate' ? 'translate' : 'transcribe',
   })
 
   const chunks = Array.isArray(output) ? (output[0]?.chunks ?? []) : (output.chunks ?? [])
@@ -122,5 +185,5 @@ export async function transcribeMedia(blob, options = {}) {
 
   report('done', 1)
   const text = Array.isArray(output) ? (output[0]?.text ?? '') : (output.text ?? words.map((w) => w.text).join(' '))
-  return { text: String(text).trim(), words }
+  return { text: String(text).trim(), words, language }
 }

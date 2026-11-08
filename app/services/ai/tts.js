@@ -10,8 +10,21 @@
  */
 import { parseOverrides, processVoice } from './voiceFx'
 
-/** Curated voices (Polish first), id → label. Any Piper voice id works. */
+/**
+ * Piper voices newer than vits-web's built-in list, id → path in the official
+ * rhasspy/piper-voices repository (vits-web only knows its own mirror).
+ */
+const EXTRA_VOICE_PATHS = {
+  'pl_PL-bass-high': 'pl/pl_PL/bass/high/pl_PL-bass-high.onnx',
+}
+// vits-web requests `<its mirror>/resolve/main/<path>`; the "../" segments walk
+// back to the host, so the URL resolves into the official repository. Files are
+// still cached in OPFS under their file name like every other voice.
+const OFFICIAL_REPO = '../../../../rhasspy/piper-voices/resolve/main/'
+
+/** Curated voices (Polish first), id → label. */
 export const TTS_VOICES = [
+  { id: 'pl_PL-bass-high', label: 'Bass · high quality', lang: 'Polski', gender: 'M' },
   { id: 'pl_PL-gosia-medium', label: 'Gosia', lang: 'Polski', gender: 'F' },
   { id: 'pl_PL-darkman-medium', label: 'Darkman', lang: 'Polski', gender: 'M' },
   { id: 'pl_PL-mc_speech-medium', label: 'MC Speech', lang: 'Polski', gender: 'M' },
@@ -43,7 +56,12 @@ let libPromise = null
 function lib() {
   // Automated tests can provide a stand-in engine (same API) to run offline.
   if (globalThis.__clipTtsEngine) return Promise.resolve(globalThis.__clipTtsEngine)
-  if (!libPromise) libPromise = import('@diffusionstudio/vits-web')
+  if (!libPromise) {
+    libPromise = import('@diffusionstudio/vits-web').then((tts) => {
+      for (const [id, path] of Object.entries(EXTRA_VOICE_PATHS)) tts.PATH_MAP[id] ??= OFFICIAL_REPO + path
+      return tts
+    })
+  }
   return libPromise
 }
 

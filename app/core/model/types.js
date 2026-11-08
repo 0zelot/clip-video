@@ -41,6 +41,15 @@ export const PROJECT_SCHEMA_VERSION = 2
  * @property {Track[]} tracks display order, top to bottom (first visual track is the top layer)
  * @property {TextStyle[]} [savedTextStyles] user presets
  * @property {CaptionStyle[]} [savedCaptionStyles] user presets
+ * @property {VoiceoverScript} [voiceover] the dialogue of the voice-over panel (not covered by undo)
+ */
+
+/**
+ * @typedef {object} VoiceoverScript
+ * @property {{ name: string, voiceId: string, pitch: number, rate: number, effect: string, mix: number, volume: number, sample: string, open: boolean, color: string }[]} speakers
+ * @property {string} script
+ * @property {number} gap pause between lines in seconds
+ * @property {boolean} withCaptions
  */
 
 /**
@@ -90,6 +99,17 @@ export const PROJECT_SCHEMA_VERSION = 2
  * @property {string} [fontFamily] for `font` assets: the CSS family name to use
  * @property {boolean} [removed] kept until no history entry can reference it
  * @property {number} importedAt
+ * @property {AssetCredit} [credit] author and licence of stock media
+ */
+
+/**
+ * @typedef {object} AssetCredit
+ * @property {string} title
+ * @property {string} author
+ * @property {string} license e.g. "CC BY 4.0" or "Public domain"
+ * @property {string} [licenseUrl]
+ * @property {string} source e.g. "commons", "nasa"
+ * @property {string} [url] page describing the clip and its licence
  */
 
 // ---------------------------------------------------------------------------

@@ -61,6 +61,9 @@ export class PlaybackEngine {
     const duration = this.duration
     if (duration <= 0) return
     if (this.#time >= duration - 1e-3) this.#time = 0
+    // play() runs inside the click / key press - the only moment strict
+    // browsers let us unlock the elements that later clips will play on.
+    this.media.unlock()
     this.#playing = true
     this.#startWall = performance.now()
     this.#startTime = this.#time

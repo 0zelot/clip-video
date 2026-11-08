@@ -77,6 +77,7 @@ const tools = computed(() => {
     return [
       { id: 'add', label: 'Add media', icon: Plus, accent: true, run: () => importMedia(MEDIA_ACCEPT) },
       { id: 'library', label: 'Library', icon: Film, run: () => library('media') },
+      { id: 'stock', label: 'Stock', icon: Clapperboard, run: () => library('stock') },
       { id: 'audio', label: 'Audio', icon: Music, run: () => importMedia('audio/*,.mp3,.m4a,.wav,.aac,.ogg,.opus,.flac') },
       { id: 'text', label: 'Text', icon: Type, run: () => library('text') },
       { id: 'elements', label: 'Stickers', icon: Shapes, run: () => library('elements') },

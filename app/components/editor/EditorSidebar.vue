@@ -1,5 +1,5 @@
 <script setup>
-import { Captions, Film, Mic, Shapes, Sparkles, Type } from 'lucide-vue-next'
+import { Captions, Clapperboard, Film, Mic, Shapes, Sparkles, Type } from 'lucide-vue-next'
 import { locateItem } from '~/core/model/queries'
 import { useProjectStore } from '~/stores/project'
 import { useEditorStore } from '~/stores/editor'
@@ -15,6 +15,7 @@ const selectedItem = computed(() => {
 
 const tabs = [
   { id: 'media', label: 'Media', icon: Film },
+  { id: 'stock', label: 'Stock', icon: Clapperboard },
   { id: 'text', label: 'Text', icon: Type },
   { id: 'elements', label: 'Elements', icon: Shapes },
   { id: 'voice', label: 'Voice', icon: Mic },
@@ -39,6 +40,7 @@ const tabs = [
       </button>
     </div>
     <MediaLibraryPanel v-if="editor.sidebarTab === 'media'" />
+    <StockPanel v-else-if="editor.sidebarTab === 'stock'" />
     <TextLibraryPanel v-else-if="editor.sidebarTab === 'text'" />
     <CaptionsPanel v-else-if="editor.sidebarTab === 'captions'" />
     <ElementsPanel v-else-if="editor.sidebarTab === 'elements'" />

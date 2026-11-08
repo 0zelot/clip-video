@@ -115,12 +115,24 @@ Then open **http://localhost:3000** in Chrome or Edge. That's it.
 **AI and smart tools (all on your device)**
 - **AI voice-over (text to speech)** with several voices - write a dialogue (`A: …`, `B: …`) and every speaker gets
   their own voice, pitch, tempo, volume and effect (radio, robot, echo, hall, monster, …); single lines can be changed
-  with `[+3, 1.2x, echo]`, and every line can be previewed. Polish voices (Gosia, Darkman, MC Speech, MLS), English (US/UK), German, Spanish,
-  French, Italian, Ukrainian, Czech, Russian, Portuguese and more. Optional captions for the lines.
+  with `[+3, 1.2x, echo]`, and every line can be previewed. Polish voices (Bass - high quality, Gosia, Darkman, MC Speech, MLS), English (US/UK), German, Spanish,
+  French, Italian, Ukrainian, Czech, Russian, Portuguese and more. Optional captions for the lines. Every project keeps
+  its own dialogue.
+- **Voice-over of a video's speech (lektor)**: recognises what is said in a clip, writes it as timed lines (optionally
+  translated into English), reads them with your voice at the same moments and turns the original sound down.
 - **Auto captions** from speech (Whisper).
 - **Remove silences**: jump-cuts pauses out of talking clips (adjustable threshold and minimum pause).
 - **Auto enhance**: corrects exposure, contrast and dull colours from the current frame.
 - **Remove background** from photos (MODNet).
+
+**Free stock videos**
+- The **Stock** tab: Minecraft gameplay, nature, landscapes, sea & beach, sky & weather, animals, city & trains,
+  fire & fireworks and Earth from space - free clips from Wikimedia Commons and NASA, loaded in the background when the
+  app starts. *Add* puts a clip on the timeline (720p at most, so phones cope), the library button only downloads it.
+- Author and licence are shown on every clip and kept with the imported media; *Copy credits* gives you the lines to
+  paste into the video description. **CC BY / CC BY-SA clips must credit their author when you publish.**
+- If a source is down or you are offline, its categories are simply not shown (or the last loaded list is used) - the
+  rest of the app is not affected.
 
 **Sound**
 - Several audio tracks at once - for example music plus a voice-over.
@@ -233,8 +245,9 @@ Open the **Voice** tab (*Voice AI* on a phone).
    ```
 
    Text in square brackets changes the voice of **just that line**: `+3` / `-2` (semitones), `high` / `low`, `1.2x`,
-   `fast` / `slow`, any effect name, `loud` / `quiet`, `pause 1` (seconds of silence before the line). Lines without a
-   name continue with the previous speaker; unknown names can be added with one click.
+   `fast` / `slow`, any effect name, `loud` / `quiet`, `pause 1` (seconds of silence before the line), `at 0:12.5`
+   (start the line at that time of the video). Lines without a name continue with the previous speaker; unknown names
+   can be added with one click.
 3. **Listen before you generate:**
    - in a speaker's settings type any **Test text** (or leave it empty to use that speaker's first line from the
      script) and press **Listen with these settings** - change pitch, tempo or the effect and press it again;
@@ -243,10 +256,19 @@ Open the **Voice** tab (*Voice AI* on a phone).
    Nothing is added to the timeline until you press *Generate*; speech is cached, so re-listening is instant.
 4. Choose the pause between lines and whether captions should be created, then press **Generate voice-over**.
 
-The lines are placed one after another from the playhead on a new audio track. Each voice (~20-60 MB) is downloaded once
-from Hugging Face the first time it is used and then stored on the device - later generations work offline. The text is
-never sent anywhere. Pitch, tempo and effects are baked into the generated audio, so the preview and the export sound
-the same.
+The lines are placed one after another from the playhead on a new audio track; lines with `[at …]` start at their time
+(or right after the previous line, if it is still speaking). Each voice (~20-115 MB) is downloaded once from Hugging
+Face the first time it is used and then stored on the device - later generations work offline. The text is never sent
+anywhere. Pitch, tempo and effects are baked into the generated audio, so the preview and the export sound the same.
+The script and the speakers are saved with the project - a new project starts with an empty script.
+
+**Voice-over of the speech in a video (lektor).** Open *Voice-over from the video's speech* at the top of the Voice
+tab, pick the clip, the language of the lines (*Spoken language*, or *English (translated)*) and how loud the original
+should stay underneath, then press **Write the lines from the speech**. The speech is recognised on your device
+(Whisper) and appears as timed lines such as `A [at 0:03.20]: …` - correct them, translate them, split them between
+speakers, then press *Generate voice-over*. Every line starts when it was said in the video; a line that would run into
+the next one is read up to 1.3× faster. If the recognised language does not match the speaker's voice, the speaker is
+switched to a voice of that language.
 
 ---
 
@@ -478,7 +500,11 @@ Runs the unit tests of the editing core (timeline operations, speed ramps, keyfr
 - **Browser support:** Chrome or Edge 94+ work best (also inside the desktop app). Firefox 130+ and Safari 16.4+ work for
   editing; exporting needs WebCodecs.
 - **Downloads on first use only:** auto captions (~45-250 MB model), background removal (~25 MB) and each AI voice
-  (~20-60 MB) are downloaded once and then work offline. Everything else works offline from the first start.
+  (~20-115 MB) are downloaded once and then work offline. Stock videos need the internet when you browse and add them;
+  once added they are stored in the project like your own files. Everything else works offline from the first start.
+- **Strict autoplay browsers** (Safari / iOS and some mobile browsers only let sound start right after a tap): the
+  preview and the voice tab start their players inside your tap, so every clip keeps playing. If a browser still
+  refuses, Clip says so ("press play again") instead of skipping lines.
 - **Long videos:** editing hour-long projects is fine (tested with a 15-minute 720p file, 15 tracks and 840+ clips at
   ~60 fps on a desktop). For the export use *Save straight to a file* (desktop app, Chrome, Edge): the video is written to
   disk as it renders and the sound is mixed in 20-second chunks, so memory use stays flat (a 4-minute test export

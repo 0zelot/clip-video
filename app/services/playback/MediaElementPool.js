@@ -9,10 +9,31 @@ const DRIFT_TOLERANCE = 0.3
 const LOOKAHEAD = 1.5
 const SNAPSHOT_MAX_SIZE = 640
 const SNAPSHOT_INTERVAL_MS = 120
+/** Unlocked elements kept ready for clips that start during playback. */
+const MAX_SPARES = { audio: 6, video: 4 }
 
 /** Source time an upcoming clip should wait at: its first frame (or now, if it already started). */
 function prerollTime(item, time) {
   return item.type === 'video' ? sourceTimeAt(item, Math.max(item.start, time)) : 0
+}
+
+/**
+ * Starts and immediately stops an element. Inside a click or key press this
+ * "unlocks" it: browsers with a strict autoplay policy (Safari / iOS, some
+ * mobile browsers) only let an element start playing on its own later if it
+ * was once started from a user gesture - otherwise every clip that begins a
+ * few seconds into playback is refused and stays silent. Outside a gesture
+ * this does nothing.
+ */
+function unlockElement(el) {
+  if (!el.paused) return
+  try {
+    const started = el.play()
+    el.pause()
+    started?.catch(() => {})
+  } catch {
+    // play() can throw synchronously in old browsers - nothing to unlock then
+  }
 }
 
 /**
@@ -25,12 +46,23 @@ function prerollTime(item, time) {
  * @property {string} itemId
  * @property {string} assetId
  * @property {number} lastUsed
+ * @property {number} lastSync number of the last sync() that used it
  * @property {boolean} seeking
  * @property {number | null} pendingSeek
  */
 export class MediaElementPool {
   /** @type {Map<string, PooledElement>} */
   #pool = new Map()
+  /**
+   * Elements without a source, ready to be reused. They are unlocked on every
+   * play() (see unlockElement), so taking one instead of creating a new element
+   * keeps clips audible on browsers with a strict autoplay policy.
+   * @type {{ audio: HTMLAudioElement[], video: HTMLVideoElement[] }}
+   */
+  #spares = { audio: [], video: [] }
+  /** Element -> pool entry it currently belongs to (elements are recycled). */
+  #owners = new WeakMap()
+  #syncCount = 0
   /**
    * Last decoded frame of every video, copied into a small canvas. While a
    * video element seeks, stalls or re-buffers it cannot be drawn - the preview
@@ -102,6 +134,69 @@ export class MediaElementPool {
     return this.#snapshots.get(itemId)
   }
 
+  /**
+   * Unlocks every element of the pool plus a few spares. Must be called
+   * synchronously from a user gesture (it is, via PlaybackEngine.play()).
+   */
+  unlock() {
+    for (const entry of this.#pool.values()) unlockElement(entry.el)
+    for (const kind of /** @type {const} */ (['audio', 'video'])) {
+      const spares = this.#spares[kind]
+      while (spares.length < MAX_SPARES[kind]) spares.push(this.#createElement(kind))
+      for (const el of spares) unlockElement(el)
+    }
+  }
+
+  /** @param {'audio' | 'video'} kind */
+  #createElement(kind) {
+    const el = document.createElement(kind)
+    el.preload = 'auto'
+    el.crossOrigin = 'anonymous'
+    if (el instanceof HTMLVideoElement) {
+      el.playsInline = true
+      el.setAttribute('playsinline', '')
+      el.disablePictureInPicture = true
+    }
+    el.addEventListener('seeking', () => {
+      const entry = this.#owners.get(el)
+      if (entry) entry.seeking = true
+    })
+    el.addEventListener('seeked', () => {
+      const entry = this.#owners.get(el)
+      if (!entry) return
+      entry.seeking = false
+      if (entry.pendingSeek !== null) {
+        const target = entry.pendingSeek
+        entry.pendingSeek = null
+        if (Math.abs(el.currentTime - target) > 0.01) this.#seekElement(entry, target)
+      }
+      this.onFrameReady?.()
+    })
+    el.addEventListener('loadeddata', () => {
+      if (this.#owners.has(el)) this.onFrameReady?.()
+    })
+    this.#container.appendChild(el)
+    return el
+  }
+
+  /**
+   * An element for a new entry: an unlocked spare, else the least recently
+   * used entry that was not needed in this or the previous frame, else a new
+   * one (on strict browsers a new element may stay silent until the next play).
+   * @param {'audio' | 'video'} kind
+   */
+  #takeElement(kind) {
+    if (!this.#spares[kind].length) {
+      let idle = null
+      for (const entry of this.#pool.values()) {
+        if (entry.el.localName !== kind || entry.lastSync >= this.#syncCount - 1) continue
+        if (!idle || entry.lastUsed < idle.lastUsed) idle = entry
+      }
+      if (idle) this.#releaseEntry(idle)
+    }
+    return this.#spares[kind].pop() ?? this.#createElement(kind)
+  }
+
   #acquire(item) {
     const url = mediaLibrary.getUrl(item.assetId)
     if (!url) return null
@@ -111,32 +206,14 @@ export class MediaElementPool {
       entry = undefined
     }
     if (!entry) {
-      const el = item.type === 'video' ? document.createElement('video') : document.createElement('audio')
-      el.preload = 'auto'
-      el.crossOrigin = 'anonymous'
-      if (el instanceof HTMLVideoElement) {
-        el.playsInline = true
-        el.setAttribute('playsinline', '')
-        el.disablePictureInPicture = true
-      }
-      const created = { el, itemId: item.id, assetId: item.assetId, lastUsed: performance.now(), seeking: false, pendingSeek: null }
-      el.addEventListener('seeking', () => (created.seeking = true))
-      el.addEventListener('seeked', () => {
-        created.seeking = false
-        if (created.pendingSeek !== null) {
-          const target = created.pendingSeek
-          created.pendingSeek = null
-          if (Math.abs(el.currentTime - target) > 0.01) this.#seekElement(created, target)
-        }
-        this.onFrameReady?.()
-      })
-      el.addEventListener('loadeddata', () => this.onFrameReady?.())
+      const el = this.#takeElement(item.type === 'video' ? 'video' : 'audio')
+      entry = { el, itemId: item.id, assetId: item.assetId, lastUsed: 0, lastSync: 0, seeking: false, pendingSeek: null }
+      this.#owners.set(el, entry)
+      this.#pool.set(item.id, entry)
       el.src = url
-      this.#container.appendChild(el)
-      this.#pool.set(item.id, created)
-      entry = created
     }
     entry.lastUsed = performance.now()
+    entry.lastSync = this.#syncCount
     return entry
   }
 
@@ -153,13 +230,18 @@ export class MediaElementPool {
     }
   }
 
+  /** Frees the media player of an entry; the element itself goes back to the spares. */
   #releaseEntry(entry) {
-    entry.el.pause()
-    entry.el.removeAttribute('src')
-    entry.el.load()
-    entry.el.remove()
+    const el = entry.el
+    this.#owners.delete(el)
     this.#pool.delete(entry.itemId)
     this.#snapshots.delete(entry.itemId)
+    el.pause()
+    el.removeAttribute('src')
+    el.load()
+    const spares = this.#spares[el.localName]
+    if (spares && spares.length < MAX_SPARES[el.localName]) spares.push(el)
+    else el.remove()
   }
 
   /**
@@ -172,6 +254,7 @@ export class MediaElementPool {
    * @param {number} masterVolume
    */
   sync(project, time, playing, masterVolume) {
+    this.#syncCount++
     const active = new Set()
     const fps = project.settings.fps
 
@@ -257,6 +340,7 @@ export class MediaElementPool {
 
   destroy() {
     for (const entry of [...this.#pool.values()]) this.#releaseEntry(entry)
+    this.#spares = { audio: [], video: [] }
     this.#container.remove()
   }
 }
