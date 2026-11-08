@@ -1,12 +1,19 @@
 import { activeItemOnTrack } from '../../core/model/queries'
 import { collectVisualLayers } from '../../core/render/compositor'
-import { sourceTimeAt } from '../../core/time'
+import { sourceTimeAt, speedAt } from '../../core/time'
 import { mediaLibrary } from '../media/mediaLibrary'
 
 const MAX_IDLE_MS = 8000
 const MAX_POOL_SIZE = 12
-const DRIFT_TOLERANCE = 0.25
-const LOOKAHEAD = 1.0
+const DRIFT_TOLERANCE = 0.3
+const LOOKAHEAD = 1.5
+const SNAPSHOT_MAX_SIZE = 640
+const SNAPSHOT_INTERVAL_MS = 120
+
+/** Source time an upcoming clip should wait at: its first frame (or now, if it already started). */
+function prerollTime(item, time) {
+  return item.type === 'video' ? sourceTimeAt(item, Math.max(item.start, time)) : 0
+}
 
 /**
  * Keeps one media element per active timeline item and synchronises it with
@@ -24,6 +31,13 @@ const LOOKAHEAD = 1.0
 export class MediaElementPool {
   /** @type {Map<string, PooledElement>} */
   #pool = new Map()
+  /**
+   * Last decoded frame of every video, copied into a small canvas. While a
+   * video element seeks, stalls or re-buffers it cannot be drawn - the preview
+   * then shows this snapshot instead of a black frame.
+   * @type {Map<string, { canvas: HTMLCanvasElement, sourceTime: number, at: number }>}
+   */
+  #snapshots = new Map()
   #container
   /** @type {(() => void) | null} */
   onFrameReady = null
@@ -31,7 +45,8 @@ export class MediaElementPool {
   constructor() {
     this.#container = document.createElement('div')
     this.#container.style.cssText =
-      'position:fixed;width:1px;height:1px;overflow:hidden;opacity:0;pointer-events:none;left:-10px;top:-10px'
+      // Kept inside the viewport: some mobile browsers stop decoding off-screen videos.
+      'position:fixed;left:0;top:0;width:2px;height:2px;overflow:hidden;opacity:0.01;pointer-events:none;z-index:-1'
     document.body.appendChild(this.#container)
   }
 
@@ -46,6 +61,45 @@ export class MediaElementPool {
     const entry = this.#pool.get(itemId)
     if (!entry) return false
     return entry.el.readyState >= 2 && !entry.seeking && entry.pendingSeek === null
+  }
+
+  /**
+   * Stores the current frame of a ready video (throttled during playback).
+   * @param {string} itemId
+   * @param {number} sourceTime
+   * @param {boolean} force copy even if the last snapshot is recent
+   */
+  snapshot(itemId, sourceTime, force = false) {
+    const video = this.getVideo(itemId)
+    if (!video || video.readyState < 2 || video.videoWidth === 0) return
+    let entry = this.#snapshots.get(itemId)
+    const now = performance.now()
+    if (entry && !force && now - entry.at < SNAPSHOT_INTERVAL_MS) return
+    if (entry && Math.abs(entry.sourceTime - sourceTime) < 1e-4) return
+    const scale = Math.min(1, SNAPSHOT_MAX_SIZE / Math.max(video.videoWidth, video.videoHeight))
+    const w = Math.max(2, Math.round(video.videoWidth * scale))
+    const h = Math.max(2, Math.round(video.videoHeight * scale))
+    if (!entry) {
+      const canvas = document.createElement('canvas')
+      entry = { canvas, sourceTime, at: now }
+      this.#snapshots.set(itemId, entry)
+    }
+    if (entry.canvas.width !== w || entry.canvas.height !== h) {
+      entry.canvas.width = w
+      entry.canvas.height = h
+    }
+    try {
+      entry.canvas.getContext('2d')?.drawImage(video, 0, 0, w, h)
+      entry.sourceTime = sourceTime
+      entry.at = now
+    } catch {
+      this.#snapshots.delete(itemId)
+    }
+  }
+
+  /** @returns {{ canvas: HTMLCanvasElement, sourceTime: number } | undefined} */
+  getSnapshot(itemId) {
+    return this.#snapshots.get(itemId)
   }
 
   #acquire(item) {
@@ -105,6 +159,7 @@ export class MediaElementPool {
     entry.el.load()
     entry.el.remove()
     this.#pool.delete(entry.itemId)
+    this.#snapshots.delete(entry.itemId)
   }
 
   /**
@@ -140,7 +195,9 @@ export class MediaElementPool {
 
       el.muted = !audible
       el.volume = Math.min(1, Math.max(0, item.audio.volume * masterVolume))
-      if (el.playbackRate !== item.speed) el.playbackRate = item.speed
+      // Speed ramps change the rate continuously; small steps avoid constant resets.
+      const rate = Math.min(16, Math.max(0.0625, Math.round(speedAt(item, Math.max(0, time - item.start)) * 100) / 100))
+      if (Math.abs(el.playbackRate - rate) > 0.004) el.playbackRate = rate
       // Speed changes must not change the pitch of the preview.
       if ('preservesPitch' in el) el.preservesPitch = true
 
@@ -159,11 +216,17 @@ export class MediaElementPool {
     }
 
     // Visual layers (including the outgoing clip of a running transition).
-    for (const lookahead of playing ? [0, LOOKAHEAD] : [0]) {
+    // Upcoming clips are pre-rolled to their *first* frame and stay there, so
+    // they are ready the moment they start (seeking them continuously to a
+    // moving target kept them permanently busy - the cause of black frames).
+    for (const lookahead of playing ? [0, LOOKAHEAD / 2, LOOKAHEAD] : [0]) {
+      const isCurrent = lookahead === 0
       for (const layer of collectVisualLayers(project, time + lookahead)) {
-        syncItem(layer.item, layer.track, layer.sourceTime, lookahead === 0)
+        const target = isCurrent ? layer.sourceTime : prerollTime(layer.item, time)
+        syncItem(layer.item, layer.track, target, isCurrent)
         if (layer.transition) {
-          syncItem(layer.transition.previous.item, layer.track, layer.transition.previous.sourceTime, lookahead === 0)
+          const prev = layer.transition.previous
+          syncItem(prev.item, layer.track, isCurrent ? prev.sourceTime : prerollTime(prev.item, time), isCurrent)
         }
       }
     }
@@ -176,7 +239,7 @@ export class MediaElementPool {
         if (!item) continue
         const assetDuration = project.assets[item.assetId]?.duration
         const isCurrent = lookahead === 0
-        syncItem(item, track, sourceTimeAt(item, isCurrent ? time : item.start, assetDuration), isCurrent)
+        syncItem(item, track, sourceTimeAt(item, isCurrent ? time : Math.max(item.start, time), assetDuration), isCurrent)
       }
     }
 

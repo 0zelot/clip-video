@@ -14,8 +14,9 @@ const step = computed(() => STEPS.find((s) => s * editor.zoom >= 80) ?? STEPS[ST
 
 const ticks = computed(() => {
   const { scrollLeft, width } = viewport.value
-  const from = Math.max(0, Math.floor(scrollLeft / editor.zoom / step.value) * step.value)
-  const to = (scrollLeft + width) / editor.zoom + step.value
+  // A margin on both sides covers small scroll steps between viewport updates.
+  const from = Math.max(0, Math.floor((scrollLeft - 200) / editor.zoom / step.value) * step.value)
+  const to = (scrollLeft + width + 200) / editor.zoom + step.value
   const result = []
   const fps = projectStore.project?.settings.fps ?? 30
   for (let t = from; t <= to; t += step.value) {
@@ -34,6 +35,15 @@ const ticks = computed(() => {
       :style="{ left: `${tick.t * editor.zoom}px` }"
     >
       {{ tick.label }}
+    </div>
+    <div
+      v-for="marker in projectStore.project?.markers ?? []"
+      :key="marker.id"
+      class="pointer-events-none absolute top-0 bottom-0 w-0"
+      :style="{ left: `${marker.t * editor.zoom}px` }"
+    >
+      <div class="absolute top-0 -left-[5px] size-2.5 rotate-45 rounded-[2px]" :style="{ background: marker.color }" />
+      <div class="absolute top-2 bottom-0 left-0 w-px opacity-70" :style="{ background: marker.color }" />
     </div>
     <div
       v-if="editor.markIn !== null"

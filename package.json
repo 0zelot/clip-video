@@ -1,10 +1,10 @@
 {
   "name": "clip-video",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "author": "Ozelot <contact@ozelot.fyi> (https://ozelot.fyi/)",
-  "description": "Clip - a private, local-first short-form video editor (Nuxt 4 SPA + Capacitor, plain JavaScript)",
+  "description": "Clip - a private, local-first video editor for Shorts, TikTok, Reels and YouTube (Nuxt 4 SPA + Capacitor Android + Electron desktop, plain JavaScript)",
   "scripts": {
     "dev": "nuxt dev",
     "build": "nuxt generate && node scripts/generate-precache.mjs",
@@ -16,13 +16,22 @@
     "cap:sync": "npm run build && cap sync android",
     "cap:open": "cap open android",
     "android": "npm run build && cap sync android && cap run android",
-    "icons": "node scripts/generate-icons.mjs"
+    "icons": "node scripts/generate-icons.mjs",
+    "desktop": "electron desktop",
+    "desktop:dev": "npm run build && electron desktop",
+    "build:desktop": "npm run build && node scripts/build-desktop.mjs",
+    "build:desktop:linux": "npm run build && node scripts/build-desktop.mjs --linux",
+    "build:desktop:win": "npm run build && node scripts/build-desktop.mjs --win",
+    "build:desktop:mac": "npm run build && node scripts/build-desktop.mjs --mac",
+    "build:android": "npm run build && node scripts/build-android.mjs",
+    "build:all": "npm run build && node scripts/build-desktop.mjs --all && node scripts/build-android.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.2",
     "@capacitor/core": "^8.5.2",
     "@capacitor/filesystem": "^8.1.3",
     "@capacitor/share": "^8.0.2",
+    "@diffusionstudio/vits-web": "^1.0.3",
     "@huggingface/transformers": "^4.3.0",
     "@pinia/nuxt": "^1.0.2",
     "idb": "^8.0.3",
@@ -37,6 +46,8 @@
   "devDependencies": {
     "@capacitor/cli": "^8.5.2",
     "@tailwindcss/vite": "^4.3.3",
+    "electron": "^38.8.6",
+    "electron-builder": "^26.18.0",
     "sharp": "^0.35.4",
     "tailwindcss": "^4.3.3",
     "vitest": "^5.0.1"

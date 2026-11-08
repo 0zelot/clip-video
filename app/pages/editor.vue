@@ -1,5 +1,5 @@
 <script setup>
-import { Film, Info, Loader2, SlidersHorizontal, Upload } from 'lucide-vue-next'
+import { Loader2, Upload } from 'lucide-vue-next'
 import { purgeRemovedAssets } from '~/core/operations/project'
 import { session, takePendingImport } from '~/services/session'
 import { projectRepository } from '~/services/storage/projectRepository'
@@ -138,16 +138,16 @@ const { dragging } = useFileDrop((files) => {
 
 function resizeTimeline(e) {
   const startY = e.clientY
-  const startHeight = editor.timelineHeight
   const target = e.currentTarget
+  const startHeight = target.nextElementSibling?.getBoundingClientRect().height ?? editor.timelineHeight
   try {
     target.setPointerCapture(e.pointerId)
   } catch {
     // pointer capture is optional (synthetic events, some touch stacks)
   }
   const move = (ev) => {
-    const max = window.innerHeight - 260
-    editor.setTimelineHeight(Math.min(max, Math.max(160, startHeight - (ev.clientY - startY))))
+    const max = window.innerHeight - (isDesktop.value ? 260 : 220)
+    editor.setTimelineHeight(Math.min(max, Math.max(isDesktop.value ? 160 : 120, startHeight - (ev.clientY - startY))))
   }
   const up = () => {
     target.removeEventListener('pointermove', move)
@@ -157,15 +157,34 @@ function resizeTimeline(e) {
   target.addEventListener('pointerup', up)
 }
 
-const mobileTabs = [
-  { id: 'media', label: 'Media', icon: Film },
-  { id: 'properties', label: 'Edit', icon: SlidersHorizontal },
-  { id: 'project', label: 'Project', icon: Info },
-]
-
 watch(isDesktop, (desktop) => {
   if (desktop) editor.mobilePanel = null
 })
+
+/** Phones get a smaller default timeline so the preview stays large. */
+const timelineStyle = computed(() => {
+  if (isLandscapePhone.value) return {}
+  if (isDesktop.value) return { height: `${editor.timelineHeight}px` }
+  return { height: editor.timelineHeightSet ? `${Math.min(editor.timelineHeight, windowHeight.value - 220)}px` : '38%' }
+})
+const windowHeight = ref(typeof window === 'undefined' ? 800 : window.innerHeight)
+function onResize() {
+  windowHeight.value = window.innerHeight
+}
+onMounted(() => window.addEventListener('resize', onResize))
+onBeforeUnmount(() => window.removeEventListener('resize', onResize))
+
+// Selecting a clip on a phone closes the library so the clip tools are visible.
+watch(
+  () => editor.selection,
+  (ids) => {
+    if (!isDesktop.value && ids.length && editor.mobilePanel === 'media') editor.mobilePanel = null
+    if (!ids.length && editor.mobilePanel === 'properties') {
+      editor.mobilePanel = null
+      editor.propertiesFocus = null
+    }
+  },
+)
 </script>
 
 <template>
@@ -206,34 +225,24 @@ watch(isDesktop, (desktop) => {
         </div>
 
         <div
-          v-if="isDesktop"
-          class="h-1.5 shrink-0 cursor-row-resize border-t border-line bg-panel hover:bg-accent/40"
+          v-if="!isLandscapePhone"
+          class="group relative h-1.5 shrink-0 cursor-row-resize touch-none border-t border-line bg-panel hover:bg-accent/40 coarse:h-3"
           role="separator"
           aria-orientation="horizontal"
           aria-label="Resize timeline"
           @pointerdown="resizeTimeline"
-        />
+        >
+          <span class="absolute top-1/2 left-1/2 hidden h-1 w-10 -translate-x-1/2 -translate-y-1/2 rounded-full bg-line coarse:block" />
+        </div>
 
         <TimelinePanel
           class="shrink-0"
           :class="isLandscapePhone ? 'w-[55%] border-l border-line' : ''"
-          :style="isDesktop ? { height: `${editor.timelineHeight}px` } : isLandscapePhone ? {} : { height: '42%' }"
+          :style="timelineStyle"
         />
       </div>
 
-      <nav v-if="!isDesktop" class="flex shrink-0 border-t border-line bg-panel safe-bottom" aria-label="Editor panels">
-        <button
-          v-for="tab in mobileTabs"
-          :key="tab.id"
-          type="button"
-          class="flex h-14 flex-1 flex-col items-center justify-center gap-0.5 text-[11px] font-medium"
-          :class="editor.mobilePanel === tab.id ? 'text-accent' : 'text-muted'"
-          @click="editor.mobilePanel = editor.mobilePanel === tab.id ? null : tab.id"
-        >
-          <component :is="tab.icon" class="size-5" />
-          {{ tab.label }}
-        </button>
-      </nav>
+      <EditorMobileToolbar v-if="!isDesktop" />
 
       <EditorMobileSheet v-if="!isDesktop" />
       <ExportDialog />

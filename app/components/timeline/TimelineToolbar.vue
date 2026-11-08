@@ -1,5 +1,5 @@
 <script setup>
-import { Captions, Copy, Magnet, Maximize, Scissors, SquareDashedBottom, Trash2, Type, ZoomIn, ZoomOut } from 'lucide-vue-next'
+import { Bookmark, Captions, Copy, Crosshair, Magnet, Snowflake, Maximize, Scissors, SquareDashedBottom, Trash2, Type, ZoomIn, ZoomOut } from 'lucide-vue-next'
 import { formatTimecode } from '~/core/time'
 import { useEditorStore } from '~/stores/editor'
 import { useProjectStore } from '~/stores/project'
@@ -29,6 +29,8 @@ const rangeLabel = computed(() => {
     <UiIconButton :icon="Scissors" label="Split at playhead (S)" size="sm" @click="commands.split()" />
     <UiIconButton :icon="Type" label="Add text at playhead (T)" size="sm" @click="commands.addText()" />
     <UiIconButton :icon="Captions" label="Captions" size="sm" @click="openCaptions()" />
+    <UiIconButton :icon="Snowflake" label="Freeze frame (F)" size="sm" @click="commands.freezeFrame()" />
+    <UiIconButton :icon="Bookmark" label="Marker (M) · jump with [ ]" size="sm" @click="commands.toggleMarker()" />
     <UiIconButton :icon="Copy" label="Duplicate (Ctrl+D)" size="sm" :disabled="!hasSelection" @click="commands.duplicateSelection()" />
     <UiIconButton :icon="Trash2" label="Delete (Del)" size="sm" :disabled="!hasSelection" @click="commands.deleteSelection()" />
 
@@ -64,6 +66,13 @@ const rangeLabel = computed(() => {
 
     <div class="flex-1" />
 
+    <UiIconButton
+      :icon="Crosshair"
+      label="Fixed centre playhead (scroll to scrub)"
+      size="sm"
+      :active="editor.centerPlayhead"
+      @click="editor.setCenterPlayhead(!editor.centerPlayhead)"
+    />
     <UiIconButton :icon="Magnet" label="Snapping (N)" size="sm" :active="editor.snapping" @click="editor.snapping = !editor.snapping" />
     <UiIconButton :icon="ZoomOut" label="Zoom out (−)" size="sm" @click="emit('zoom', 0.8)" />
     <UiIconButton :icon="ZoomIn" label="Zoom in (+)" size="sm" @click="emit('zoom', 1.25)" />

@@ -15,6 +15,7 @@ import {
   Input,
   Mp4OutputFormat,
   Output,
+  StreamTarget,
   VideoSampleSink,
   WebMOutputFormat,
   getFirstEncodableAudioCodec,
@@ -29,6 +30,7 @@ import { ExportCancelledError } from './types'
  * @property {(width: number, height: number) => (OffscreenCanvas | HTMLCanvasElement)} createCanvas
  * @property {(progress: import('./types').ExportProgress) => void} onProgress
  * @property {() => boolean} isCancelled
+ * @property {(index: number) => Promise<{ sampleRate: number, channels: Float32Array[] }>} [getAudioChunk]
  */
 
 /** Sequential frame reader for one video file - decodes forward, re-seeks on jumps. */
@@ -138,7 +140,9 @@ async function resolveCodecs(job, width, height) {
   const warnings = []
   const bitrate = job.options.videoBitrate
   const tryContainer = async (container) => {
-    const format = container === 'mp4' ? new Mp4OutputFormat({ fastStart: 'in-memory' }) : new WebMOutputFormat()
+    // 'in-memory' keeps the whole file in RAM until the end - only for short,
+    // in-memory exports; long or file exports write the index at the end.
+    const format = container === 'mp4' ? new Mp4OutputFormat({ fastStart: job.fileHandle || projectDuration(job.project) > 600 ? false : 'in-memory' }) : new WebMOutputFormat()
     const videoPreference = container === 'mp4' ? ['avc', 'hevc', 'vp9', 'av1'] : ['vp9', 'vp8', 'av1']
     const supportedVideo = format.getSupportedVideoCodecs()
     const videoCodec = await getFirstEncodableVideoCodec(
@@ -151,7 +155,7 @@ async function resolveCodecs(job, width, height) {
       ? await getFirstEncodableAudioCodec(
           audioPreference.filter((c) => supportedAudio.includes(c)),
           {
-            numberOfChannels: job.audio.channels.length,
+            numberOfChannels: 2,
             sampleRate: job.audio.sampleRate,
             bitrate: job.options.audioBitrate,
           },
@@ -203,7 +207,10 @@ export async function runExportPipeline(job, hooks) {
   const ctx = canvas.getContext('2d', { alpha: false })
   if (!ctx) throw new Error('Could not create a 2D canvas for rendering.')
 
-  const output = new Output({ format, target: new BufferTarget() })
+  // Write straight into a file the user picked (long videos), otherwise into memory.
+  const writable = job.fileHandle ? await job.fileHandle.createWritable() : null
+  const target = writable ? new StreamTarget(writable, { chunked: true, chunkSize: 8 * 1024 * 1024 }) : new BufferTarget()
+  const output = new Output({ format, target })
   const videoSource = new CanvasSource(canvas, {
     codec: videoCodec,
     bitrate: options.videoBitrate,
@@ -246,21 +253,42 @@ export async function runExportPipeline(job, hooks) {
   try {
     await output.start()
 
-    const audio = job.audio
-    const audioChunk = audio ? Math.round(audio.sampleRate / 2) : 0
+    const audio = job.audio && hooks.getAudioChunk ? job.audio : null
     let audioWritten = 0
+    /** @type {{ index: number, data: { sampleRate: number, channels: Float32Array[] } } | null} */
+    let current = null
+    let prefetch = null
+    const totalAudioFrames = audio ? Math.round(duration * audio.sampleRate) : 0
+    const chunkFrames = audio ? Math.round(audio.chunkSeconds * audio.sampleRate) : 0
+    const loadChunk = async (index) => {
+      const pending = prefetch?.index === index ? prefetch.promise : hooks.getAudioChunk(index)
+      const data = await pending
+      // Ask for the next chunk while this one is being encoded.
+      prefetch = index + 1 < audio.chunkCount ? { index: index + 1, promise: hooks.getAudioChunk(index + 1) } : null
+      prefetch?.promise.catch(() => {})
+      return { index, data }
+    }
     const writeAudioUntil = async (time) => {
       if (!audio || !audioSource) return
-      const totalAudioFrames = audio.channels[0].length
       const target = Math.min(totalAudioFrames, Math.ceil(time * audio.sampleRate))
       while (audioWritten < target) {
-        const count = Math.min(audioChunk, totalAudioFrames - audioWritten)
-        const data = new Float32Array(count * audio.channels.length)
-        audio.channels.forEach((ch, i) => data.set(ch.subarray(audioWritten, audioWritten + count), i * count))
+        const index = Math.floor(audioWritten / chunkFrames)
+        if (!current || current.index !== index) current = await loadChunk(index)
+        const offset = audioWritten - index * chunkFrames
+        const available = current.data.channels[0].length - offset
+        if (available <= 0) {
+          // Rounding at the end of a chunk: skip to the next one.
+          audioWritten = (index + 1) * chunkFrames
+          continue
+        }
+        const count = Math.min(Math.round(audio.sampleRate / 2), available, target - audioWritten)
+        const channels = current.data.channels
+        const data = new Float32Array(count * channels.length)
+        channels.forEach((ch, i) => data.set(ch.subarray(offset, offset + count), i * count))
         const sample = new AudioSample({
           data,
           format: 'f32-planar',
-          numberOfChannels: audio.channels.length,
+          numberOfChannels: channels.length,
           sampleRate: audio.sampleRate,
           timestamp: audioWritten / audio.sampleRate,
         })
@@ -360,6 +388,9 @@ export async function runExportPipeline(job, hooks) {
     audioSource?.close()
     await output.finalize()
 
+    if (writable) {
+      return { buffer: null, savedToFile: job.fileHandle.name, mimeType: format.mimeType, extension: container, videoCodec, audioCodec: audioSource ? audioCodec : null, warnings }
+    }
     const buffer = output.target.buffer
     if (!buffer) throw new Error('Encoder produced no output.')
     return {
@@ -372,6 +403,8 @@ export async function runExportPipeline(job, hooks) {
     }
   } catch (error) {
     if (output.state !== 'finalized' && output.state !== 'canceled') await output.cancel().catch(() => {})
+    // Do not leave a half-written file behind.
+    if (writable) await job.fileHandle.remove?.().catch(() => {})
     if (cancelled) throw new ExportCancelledError()
     throw error
   } finally {

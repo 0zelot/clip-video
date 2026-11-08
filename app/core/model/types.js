@@ -147,7 +147,7 @@ export const PROJECT_SCHEMA_VERSION = 2
 /**
  * Transition played at the start of an item, blending it with the clip before
  * it on the same track.
- * @typedef {'none' | 'fade' | 'crossfade' | 'dipBlack' | 'dipWhite' | 'slide' | 'wipe' | 'zoom'} TransitionKind
+ * @typedef {'none' | 'fade' | 'crossfade' | 'dipBlack' | 'dipWhite' | 'slide' | 'push' | 'wipe' | 'zoom' | 'zoomOut' | 'blur' | 'spin' | 'flash' | 'iris' | 'doors' | 'clock' | 'glitch' | 'whip'} TransitionKind
  * @typedef {'left' | 'right' | 'up' | 'down'} TransitionDirection
  * @typedef {{ kind: TransitionKind, duration: Seconds, direction?: TransitionDirection }} Transition
  */
@@ -180,6 +180,7 @@ export const PROJECT_SCHEMA_VERSION = 2
  * @property {number} opacity
  * @property {EffectParams} effects
  * @property {Transition} [transitionIn]
+ * @property {Motion} [motion]
  * @property {KeyframeTracks} [keyframes]
  */
 
@@ -204,6 +205,14 @@ export const PROJECT_SCHEMA_VERSION = 2
  * @property {number} sepia 0..1
  * @property {number} invert 0..1
  * @property {number} vignette 0..1
+ * @property {number} [grain] film grain 0..1
+ * @property {number} [temperature] -1 (cold) .. 1 (warm)
+ */
+
+/**
+ * Automatic camera motion over the duration of a clip (Ken Burns, shake…).
+ * @typedef {'none' | 'zoomIn' | 'zoomOut' | 'panLeft' | 'panRight' | 'panUp' | 'panDown' | 'shake' | 'pulse'} MotionKind
+ * @typedef {{ kind: MotionKind, amount: number }} Motion amount 0..1
  */
 
 /**
@@ -279,8 +288,23 @@ export const PROJECT_SCHEMA_VERSION = 2
  * @returns {boolean} true for items drawn on the canvas
  */
 export function isVisualItem(item) {
-  return item.type === 'video' || item.type === 'image' || item.type === 'text' || item.type === 'caption'
+  return item.type === 'video' || item.type === 'image' || item.type === 'text' || item.type === 'caption' || item.type === 'blur'
 }
+
+/** Picture-carrying clips (video and photos/stickers). */
+export function isMediaVisual(item) {
+  return item.type === 'video' || item.type === 'image'
+}
+
+/**
+ * Blur / pixelate region: an adjustment clip that blurs whatever is below it.
+ * @typedef {object} BlurProps
+ * @property {'rect' | 'ellipse'} shape
+ * @property {'blur' | 'pixelate'} mode
+ * @property {number} amount 0..1
+ * @property {boolean} invert blur everything except the region
+ * @property {{ w: number, h: number }} size normalized to the canvas
+ */
 
 /**
  * @param {Item} item

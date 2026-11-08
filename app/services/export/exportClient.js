@@ -1,6 +1,11 @@
 import { referencedAssetIds } from '../../core/model/queries'
+
+/** True when the browser can write an export straight into a file the user picks. */
+export function canSaveToFile() {
+  return typeof window !== 'undefined' && typeof window.showSaveFilePicker === 'function' && typeof FileSystemFileHandle !== 'undefined' && 'createWritable' in FileSystemFileHandle.prototype
+}
 import { mediaLibrary } from '../media/mediaLibrary'
-import { mixProjectAudio } from './audioMix'
+import { createAudioMixer } from './audioMix'
 import { runExportPipeline } from './pipeline'
 import { ExportCancelledError } from './types'
 
@@ -24,9 +29,6 @@ export function getExportSupport() {
 
 class WorkerStartupError extends Error {}
 
-/** Audio mixing takes this share of the overall progress bar. */
-const AUDIO_WEIGHT = 0.1
-
 /**
  * @param {import('../../core/model/types').Project} project
  * @param {import('./types').ExportOptions} options
@@ -38,6 +40,7 @@ export function startExport(project, options, onProgress) {
   let worker = null
   let killWorker = null
 
+  let mixer = null
   const promise = (async () => {
     const support = getExportSupport()
     if (!support.supported) throw new Error(support.reason)
@@ -54,18 +57,15 @@ export function startExport(project, options, onProgress) {
       else blobs[assetId] = blob
     }
 
-    const audioWeight = options.includeAudio ? AUDIO_WEIGHT : 0
-    const audio = options.includeAudio
-      ? await mixProjectAudio(project, blobs, {
-          signal: abort.signal,
-          onProgress: (p) => onProgress({ phase: 'audio', progress: p * audioWeight, framesDone: 0, framesTotal: 0 }),
-        })
-      : null
+    // Audio is mixed in chunks on demand (see createAudioMixer).
+    mixer = options.includeAudio ? createAudioMixer(project, blobs) : null
+    const audio = mixer ? { sampleRate: mixer.sampleRate, chunkSeconds: mixer.chunkSeconds, chunkCount: mixer.chunkCount } : null
     if (abort.signal.aborted) throw new ExportCancelledError()
 
     // Immer freezes objects; a JSON round-trip yields a plain, cloneable snapshot.
-    const job = { project: JSON.parse(JSON.stringify(project)), blobs, fonts, options, audio }
-    const mapProgress = (p) => ({ ...p, progress: audioWeight + p.progress * (1 - audioWeight) })
+    const job = { project: JSON.parse(JSON.stringify(project)), blobs, fonts, options, audio, fileHandle: options.fileHandle ?? null }
+    delete job.options.fileHandle
+    const mapProgress = (p) => p
 
     if (support.worker) {
       try {
@@ -84,8 +84,9 @@ export function startExport(project, options, onProgress) {
       },
       onProgress: (p) => onProgress(mapProgress(p)),
       isCancelled: () => abort.signal.aborted,
+      getAudioChunk: (index) => mixer.renderChunk(index, abort.signal),
     })
-  })()
+  })().finally(() => mixer?.close())
 
   function runInWorker(job, mapProgress) {
     return new Promise((resolve, reject) => {
@@ -111,6 +112,12 @@ export function startExport(project, options, onProgress) {
         const msg = event.data
         started = true
         if (msg.type === 'progress') onProgress(mapProgress(msg.progress))
+        else if (msg.type === 'audio-request') {
+          mixer
+            .renderChunk(msg.index, abort.signal)
+            .then((chunk) => worker?.postMessage({ type: 'audio-chunk', index: msg.index, chunk }, chunk.channels.map((c) => c.buffer)))
+            .catch((error) => worker?.postMessage({ type: 'audio-chunk', index: msg.index, error: error instanceof Error ? error.message : String(error) }))
+        }
         else if (msg.type === 'done') {
           cleanup()
           resolve(msg.result)

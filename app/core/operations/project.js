@@ -87,3 +87,12 @@ export function purgeRemovedAssets(project) {
   for (const id of purged) delete assets[id]
   return { project: { ...project, assets }, purged }
 }
+
+/** Adds a timeline marker (beats, notes) and keeps them sorted. */
+export function addMarker(project, marker) {
+  project.markers = [...(project.markers ?? []).filter((m) => Math.abs(m.t - marker.t) > 1e-3), marker].sort((a, b) => a.t - b.t)
+}
+
+export function removeMarker(project, markerId) {
+  project.markers = (project.markers ?? []).filter((m) => m.id !== markerId)
+}

@@ -1,0 +1,9 @@
+{
+  "name": "clip-desktop",
+  "productName": "Clip",
+  "version": "0.2.0",
+  "description": "Clip - a private, local-first video editor (desktop shell)",
+  "author": "Ozelot <contact@ozelot.fyi> (https://ozelot.fyi/)",
+  "main": "main.cjs",
+  "private": true
+}

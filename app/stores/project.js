@@ -5,6 +5,7 @@ import * as itemOps from '~/core/operations/items'
 import * as projectOps from '~/core/operations/project'
 import * as textOps from '~/core/operations/text'
 import { projectDuration } from '~/core/model/queries'
+import { removeKeyframesAt, setKeyframes } from '~/core/render/animate'
 import { projectRepository } from '~/services/storage/projectRepository'
 
 /**
@@ -115,7 +116,7 @@ export const useProjectStore = defineStore('project', () => {
       if (options.coalesceKey && last?.key === options.coalesceKey && now - last.time < COALESCE_WINDOW_MS) {
         last.time = now
       } else {
-        const entry = { snapshot: { tracks: current.tracks, settings: current.settings }, label, key: options.coalesceKey, time: now }
+        const entry = { snapshot: { tracks: current.tracks, settings: current.settings, markers: current.markers ?? [] }, label, key: options.coalesceKey, time: now }
         past.value = [...past.value.slice(-(HISTORY_LIMIT - 1)), entry]
       }
       if (future.value.length) future.value = []
@@ -130,7 +131,7 @@ export const useProjectStore = defineStore('project', () => {
     const entry = from.value[from.value.length - 1]
     if (!current || !entry) return null
     from.value = from.value.slice(0, -1)
-    to.value = [...to.value, { snapshot: { tracks: current.tracks, settings: current.settings }, label: entry.label, time: 0 }]
+    to.value = [...to.value, { snapshot: { tracks: current.tracks, settings: current.settings, markers: current.markers ?? [] }, label: entry.label, time: 0 }]
     project.value = { ...current, ...entry.snapshot, updatedAt: Date.now() }
     markDirty()
     return entry.label
@@ -239,6 +240,46 @@ export const useProjectStore = defineStore('project', () => {
         return ids
       }) ?? [],
     setTransition: (itemId, transition) => mutate('Change transition', (p) => itemOps.setTransition(p, itemId, transition)),
+    applyTransitionToTrack: (itemId, transition) =>
+      mutate('Apply transition to all cuts', (p) => itemOps.applyTransitionToTrack(p, itemId, transition)) ?? 0,
+    setSpeedRamp: (itemId, speed, ramp) =>
+      mutate('Speed ramp', (p) => itemOps.setItemSpeed(p, itemId, speed, { ramp: ramp ?? null }), { coalesceKey: `speedramp:${itemId}` }),
+    setEffectsRamp: (itemId, ramp) =>
+      mutate('Effect fade', (p) => {
+        const item = p.tracks.flatMap((t) => t.items).find((i) => i.id === itemId)
+        if (!item) return false
+        if (!ramp || (!(ramp.rampIn > 0) && !(ramp.rampOut > 0))) delete item.effectsRamp
+        else item.effectsRamp = { from: ramp.from ?? item.effectsRamp?.from ?? {}, rampIn: Math.max(0, ramp.rampIn ?? 0), rampOut: Math.max(0, ramp.rampOut ?? 0) }
+        return true
+      }, { coalesceKey: `fxramp:${itemId}` }),
+    setKeyframes: (itemId, local, values, key) =>
+      mutate('Keyframe', (p) => {
+        const item = p.tracks.flatMap((t) => t.items).find((i) => i.id === itemId)
+        if (!item) return false
+        setKeyframes(item, local, values)
+        return true
+      }, { coalesceKey: key }),
+    removeKeyframesAt: (itemId, local) =>
+      mutate('Remove keyframe', (p) => {
+        const item = p.tracks.flatMap((t) => t.items).find((i) => i.id === itemId)
+        if (!item) return false
+        removeKeyframesAt(item, local)
+        return true
+      }),
+    clearKeyframes: (itemId) =>
+      mutate('Clear keyframes', (p) => {
+        const item = p.tracks.flatMap((t) => t.items).find((i) => i.id === itemId)
+        if (item) delete item.keyframes
+      }),
+    insertOverlay: (item, label = 'Add overlay', options = {}) => mutate(label, (p) => itemOps.insertOverlay(p, item, options)?.id ?? null),
+    insertFreezeFrame: (videoItemId, t, still) => mutate('Freeze frame', (p) => itemOps.insertFreezeFrame(p, videoItemId, t, still)),
+    addMarker: (marker) => mutate('Add marker', (p) => projectOps.addMarker(p, marker)),
+    removeMarker: (markerId) => mutate('Remove marker', (p) => projectOps.removeMarker(p, markerId)),
+    cutRangesFromItem: (itemId, ranges, label = 'Remove silences') =>
+      mutate(label, (p) => itemOps.cutRangesFromItem(p, itemId, ranges)) ?? { removed: 0, seconds: 0 },
+    replaceAsset: (itemId, assetId, name) => mutate('Replace media', (p) => itemOps.updateItem(p, itemId, { assetId, name })),
+    setMotion: (itemId, motion) =>
+      mutate('Change motion', (p) => itemOps.updateItem(p, itemId, { motion }), { coalesceKey: `motion:${itemId}` }),
     setEffects: (itemId, effects, key) =>
       mutate('Change effects', (p) => itemOps.updateItem(p, itemId, { effects }), { coalesceKey: key ?? `effects:${itemId}` }),
     setTransform: (itemId, transform, key) =>

@@ -8,7 +8,7 @@
 import { MIN_ITEM_DURATION, createId, createItemFromAsset, createTrack } from '../model/defaults'
 import { findTrack, locateItem, trackEnd } from '../model/queries'
 import { isTimedItem, trackAccepts } from '../model/types'
-import { EPSILON, itemEnd } from '../time'
+import { EPSILON, consumedAt, durationForRamp, effectiveSpeed, itemEnd, sourceRange } from '../time'
 
 /** @param {import('../model/types').Track} track */
 export function sortTrack(track) {
@@ -196,22 +196,41 @@ export function getTrimBounds(project, itemId, edge) {
   const asset = project.assets[item.assetId]
   const srcDuration = isTimedItem(item) ? asset?.duration : undefined
   const loops = item.type === 'audio' && item.loop
+  const speed = isTimedItem(item) ? effectiveSpeed(item) : 1
 
   if (edge === 'start') {
     let min = prev ? itemEnd(prev) : 0
     if (isTimedItem(item) && !loops) {
-      if (!item.reversed) min = Math.max(min, item.start - item.sourceIn / item.speed)
-      else if (srcDuration) min = Math.max(min, end - (srcDuration - item.sourceIn) / item.speed)
+      if (!item.reversed) min = Math.max(min, item.start - item.sourceIn / speed)
+      else if (srcDuration) min = Math.max(min, end - (srcDuration - item.sourceIn) / speed)
     }
     return { min, max: Math.max(min, end - MIN_ITEM_DURATION) }
   }
   let max = next ? next.start : Number.POSITIVE_INFINITY
   if (isTimedItem(item) && !loops) {
-    if (!item.reversed && srcDuration) max = Math.min(max, item.start + (srcDuration - item.sourceIn) / item.speed)
-    else if (item.reversed) max = Math.min(max, end + item.sourceIn / item.speed)
+    if (!item.reversed && srcDuration) max = Math.min(max, item.start + (srcDuration - item.sourceIn) / speed)
+    else if (item.reversed) max = Math.min(max, end + item.sourceIn / speed)
   }
   const min = item.start + MIN_ITEM_DURATION
   return { min, max: Math.max(min, max) }
+}
+
+/**
+ * Turns a speed ramp into a constant (average) speed with the same timing.
+ * Timing edits (trim, split, in-point) work on constant-speed clips.
+ */
+export function flattenSpeedRamp(item) {
+  if (!item.speedRamp) return
+  const range = sourceRange(item)
+  delete item.speedRamp
+  if (item.duration > 0) item.speed = Math.min(16, Math.max(0.1, range / item.duration))
+}
+
+/** Clips a fading effect to the remaining part of a split clip. */
+function trimEffectsRamp(item, keep) {
+  if (!item.effectsRamp) return
+  item.effectsRamp = { ...item.effectsRamp, ...(keep === 'left' ? { rampOut: 0 } : { rampIn: 0 }) }
+  if (!item.effectsRamp.rampIn && !item.effectsRamp.rampOut) delete item.effectsRamp
 }
 
 function wrapSource(t, duration) {
@@ -228,6 +247,7 @@ export function trimItemStart(project, itemId, newStart) {
   const start = Math.min(Math.max(newStart, bounds.min), bounds.max)
   const delta = start - item.start
   if (Math.abs(delta) < EPSILON) return false
+  if (isTimedItem(item)) flattenSpeedRamp(item)
   if (isTimedItem(item) && !item.reversed) {
     item.sourceIn = item.sourceIn + delta * item.speed
     if (item.type === 'audio' && item.loop) item.sourceIn = wrapSource(item.sourceIn, project.assets[item.assetId]?.duration)
@@ -248,6 +268,7 @@ export function trimItemEnd(project, itemId, newEnd) {
   const end = Math.min(Math.max(newEnd, bounds.min), bounds.max)
   const delta = end - itemEnd(item)
   if (Math.abs(delta) < EPSILON) return false
+  if (isTimedItem(item)) flattenSpeedRamp(item)
   if (isTimedItem(item) && item.reversed) item.sourceIn = Math.max(0, item.sourceIn - delta * item.speed)
   item.duration += delta
   return true
@@ -265,16 +286,40 @@ export function splitItem(project, itemId, t) {
   const rightDuration = itemEnd(item) - t
   if (leftDuration < MIN_ITEM_DURATION - EPSILON || rightDuration < MIN_ITEM_DURATION - EPSILON) return null
 
+  if (isTimedItem(item) && item.speedRamp) {
+    // Keep the exact cut position, then give each half its own average speed.
+    const range = sourceRange(item)
+    const leftRange = consumedAt(item, leftDuration)
+    delete item.speedRamp
+    item.speed = Math.min(16, Math.max(0.1, leftRange / leftDuration))
+    const rightSpeed = Math.min(16, Math.max(0.1, (range - leftRange) / rightDuration))
+    const right = JSON.parse(JSON.stringify(item))
+    right.speed = rightSpeed
+    return finishSplit(project, loc, item, right, t, leftDuration, rightDuration, leftRange)
+  }
+
   const right = JSON.parse(JSON.stringify(item))
+  return finishSplit(project, loc, item, right, t, leftDuration, rightDuration, isTimedItem(item) ? leftDuration * item.speed : 0)
+}
+
+function finishSplit(project, loc, item, right, t, leftDuration, rightDuration, leftRange) {
   right.id = createId()
   right.start = t
   right.duration = rightDuration
+  // A transition belongs to the start of the original clip, not to the cut.
+  delete right.transitionIn
+  trimEffectsRamp(right, 'right')
+  trimEffectsRamp(item, 'left')
+  if (item.animation && (item.type === 'video' || item.type === 'image')) {
+    right.animation = { ...right.animation, in: { kind: 'none', duration: 0 } }
+    item.animation = { ...item.animation, out: { kind: 'none', duration: 0 } }
+  }
 
   if (isTimedItem(item)) {
     if (item.reversed) {
-      item.sourceIn = item.sourceIn + rightDuration * item.speed
+      item.sourceIn = item.sourceIn + rightDuration * right.speed
     } else {
-      right.sourceIn = item.sourceIn + leftDuration * item.speed
+      right.sourceIn = item.sourceIn + leftRange
       if (right.type === 'audio' && right.loop) {
         right.sourceIn = wrapSource(right.sourceIn, project.assets[item.assetId]?.duration)
       }
@@ -396,6 +441,7 @@ export function setSourceIn(project, itemId, sourceIn) {
   const loc = locateItem(project, itemId)
   if (!loc || loc.track.locked || !isTimedItem(loc.item)) return false
   const item = loc.item
+  flattenSpeedRamp(item)
   const srcDuration = project.assets[item.assetId]?.duration ?? Number.POSITIVE_INFINITY
   const maxIn = Math.max(0, srcDuration - MIN_ITEM_DURATION * item.speed)
   item.sourceIn = Math.min(Math.max(0, sourceIn), maxIn)
@@ -447,17 +493,28 @@ export function setItemSpeed(project, itemId, speed, options = {}) {
   if (!loc || loc.track.locked || !isTimedItem(loc.item)) return false
   const item = loc.item
   const next = Math.min(16, Math.max(0.1, speed))
-  if (Math.abs(next - item.speed) < 1e-6) return false
+  const ramp = options.ramp === undefined ? item.speedRamp : options.ramp
+  if (Math.abs(next - item.speed) < 1e-6 && ramp === item.speedRamp) return false
 
-  const sourceRange = item.duration * item.speed
-  const newDuration = Math.max(MIN_ITEM_DURATION, sourceRange / next)
+  const range = sourceRange(item)
+  let newDuration
+  if (ramp && ((ramp.rampIn ?? 0) > 0 || (ramp.rampOut ?? 0) > 0)) {
+    const from = Math.min(16, Math.max(0.1, ramp.from ?? 1))
+    const fit = durationForRamp(range, next, from, ramp.rampIn ?? 0, ramp.rampOut ?? 0)
+    item.speedRamp = { from, rampIn: fit.rampIn, rampOut: fit.rampOut }
+    newDuration = Math.max(MIN_ITEM_DURATION, fit.duration)
+  } else {
+    delete item.speedRamp
+    newDuration = Math.max(MIN_ITEM_DURATION, range / next)
+  }
   const delta = newDuration - item.duration
+  const oldEnd = itemEnd(item)
   item.speed = next
   item.duration = newDuration
 
   if (options.ripple !== false) {
     for (const other of loc.track.items) {
-      if (other.id !== item.id && other.start >= itemEnd(item) - delta - EPSILON) other.start += delta
+      if (other.id !== item.id && other.start >= oldEnd - EPSILON) other.start += delta
     }
   } else {
     // Without rippling, clamp to the next clip.
@@ -533,4 +590,111 @@ export function hasPreviousNeighbour(project, itemId) {
   if (!loc) return false
   const prev = loc.track.items[loc.itemIndex - 1]
   return !!prev && Math.abs(itemEnd(prev) - loc.item.start) < 0.05
+}
+
+/**
+ * Sets the same transition on every clip of the item's track that directly
+ * follows another clip (or clears them all for `kind: 'none'`).
+ * @returns {number} number of cuts changed
+ */
+export function applyTransitionToTrack(project, itemId, transition) {
+  const loc = locateItem(project, itemId)
+  if (!loc || loc.track.locked) return 0
+  let count = 0
+  for (const item of loc.track.items) {
+    if (!hasPreviousNeighbour(project, item.id)) continue
+    if (setTransition(project, item.id, transition)) count++
+  }
+  return count
+}
+
+/**
+ * Removes parts of one clip (e.g. silences) and closes the gaps on its track.
+ * Other tracks are not touched.
+ *
+ * @param {import('../model/types').Project} project
+ * @param {string} itemId
+ * @param {[number, number][]} ranges timeline ranges inside the clip
+ * @returns {{ removed: number, seconds: number }}
+ */
+export function cutRangesFromItem(project, itemId, ranges) {
+  const loc = locateItem(project, itemId)
+  if (!loc || loc.track.locked) return { removed: 0, seconds: 0 }
+  const track = loc.track
+  let removed = 0
+  let seconds = 0
+  // Back to front: the original item always remains the left-most piece.
+  const sorted = [...ranges].filter(([a, b]) => b - a > MIN_ITEM_DURATION).sort((x, y) => y[0] - x[0])
+  for (const [rawFrom, rawTo] of sorted) {
+    const item = track.items.find((i) => i.id === itemId)
+    if (!item) break
+    const from = Math.max(item.start, rawFrom)
+    const to = Math.min(itemEnd(item), rawTo)
+    if (to - from < MIN_ITEM_DURATION) continue
+
+    if (itemEnd(item) - to >= MIN_ITEM_DURATION) {
+      const rightId = splitItem(project, item.id, to)
+      const right = rightId ? track.items.find((i) => i.id === rightId) : null
+      if (right) delete right.transitionIn
+    }
+    let middle = track.items.find((i) => i.id === itemId)
+    if (!middle) break
+    if (from - middle.start >= MIN_ITEM_DURATION) {
+      const middleId = splitItem(project, middle.id, from)
+      middle = middleId ? track.items.find((i) => i.id === middleId) : null
+      if (!middle) continue
+    }
+    const gap = middle.duration
+    const gapStart = middle.start
+    track.items = track.items.filter((i) => i.id !== middle.id)
+    for (const other of track.items) if (other.start >= gapStart - EPSILON) other.start -= gap
+    sortTrack(track)
+    removed++
+    seconds += gap
+  }
+  return { removed, seconds }
+}
+
+/**
+ * Puts a visual item at exactly `item.start` on a free overlay track above the
+ * main track, creating a new top track when every overlay track is busy.
+ * @returns {import('../model/types').Item | null}
+ */
+export function insertOverlay(project, item, options = {}) {
+  const visual = project.tracks.filter((t) => t.kind === 'visual' && !t.locked)
+  if (options.directlyAboveMain && visual.length) {
+    // Blur regions must sit right above the footage, below text and stickers.
+    const main = visual[visual.length - 1]
+    const mainIndex = project.tracks.indexOf(main)
+    const above = project.tracks[mainIndex - 1]
+    if (above && above.kind === 'visual' && !above.locked && isRangeFree(above, item.start, item.duration)) {
+      return insertItem(project, above.id, item, { exact: true })
+    }
+    const track = addTrack(project, 'visual', mainIndex)
+    return insertItem(project, track.id, item, { exact: true })
+  }
+  // Tracks above the bottom (main) track, nearest to it first.
+  for (const track of visual.slice(0, -1).reverse()) {
+    if (isRangeFree(track, item.start, item.duration)) return insertItem(project, track.id, item, { exact: true })
+  }
+  const track = addTrack(project, 'visual')
+  return insertItem(project, track.id, item, { exact: true })
+}
+
+/**
+ * Freeze frame: splits the clip at `t`, pushes everything after it on the
+ * track by `duration` and inserts `still` (an image item) in the gap.
+ * @returns {string | null} id of the inserted still
+ */
+export function insertFreezeFrame(project, videoItemId, t, still) {
+  const loc = locateItem(project, videoItemId)
+  if (!loc || loc.track.locked) return null
+  const track = loc.track
+  const item = loc.item
+  if (t > item.start + EPSILON && t < itemEnd(item) - EPSILON) splitItem(project, item.id, t)
+  for (const other of track.items) if (other.start >= t - EPSILON) other.start += still.duration
+  still.start = t
+  track.items.push(still)
+  sortTrack(track)
+  return still.id
 }

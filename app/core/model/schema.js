@@ -31,11 +31,24 @@ function normalizeTransition(raw) {
   }
 }
 
+function normalizeRamp(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined
+  const rampIn = Math.max(0, num(raw.rampIn, 0))
+  const rampOut = Math.max(0, num(raw.rampOut, 0))
+  return rampIn > 0 || rampOut > 0 ? { rampIn, rampOut } : undefined
+}
+
+function normalizeMotion(raw) {
+  if (!raw || typeof raw !== 'object' || typeof raw.kind !== 'string' || raw.kind === 'none') return undefined
+  return { kind: raw.kind, amount: Math.min(1, Math.max(0, num(raw.amount, 0.5))) }
+}
+
 function normalizeTextStyle(raw, base) {
   const style = { ...base, ...(raw ?? {}) }
   style.stroke = { ...base.stroke, ...(raw?.stroke ?? {}) }
   style.shadow = { ...base.shadow, ...(raw?.shadow ?? {}) }
   style.background = { ...base.background, ...(raw?.background ?? {}) }
+  style.stroke2 = { ...base.stroke2, ...(raw?.stroke2 ?? {}) }
   return style
 }
 
@@ -60,11 +73,15 @@ function normalizeItem(raw) {
     effects: { ...neutralEffects(), ...(raw.effects ?? {}) },
     ...(normalizeTransition(raw.transitionIn) ? { transitionIn: normalizeTransition(raw.transitionIn) } : {}),
     ...(raw.keyframes ? { keyframes: raw.keyframes } : {}),
+    ...(normalizeMotion(raw.motion) ? { motion: normalizeMotion(raw.motion) } : {}),
+    ...(typeof raw.mask === 'string' && raw.mask !== 'none' ? { mask: raw.mask } : {}),
+    ...(typeof raw.blendMode === 'string' && raw.blendMode !== 'normal' ? { blendMode: raw.blendMode } : {}),
+    ...(normalizeRamp(raw.effectsRamp) ? { effectsRamp: { ...normalizeRamp(raw.effectsRamp), from: { ...(raw.effectsRamp.from ?? {}) } } } : {}),
   }
   const timed = {
     sourceIn: Math.max(0, num(raw.sourceIn, 0)),
     speed: num(raw.speed, 1) > 0 ? num(raw.speed, 1) : 1,
-    ...(Array.isArray(raw.speedRamp) ? { speedRamp: raw.speedRamp } : {}),
+    ...(normalizeRamp(raw.speedRamp) ? { speedRamp: { ...normalizeRamp(raw.speedRamp), from: Math.min(16, Math.max(0.1, num(raw.speedRamp.from, 1))) } } : {}),
     ...(raw.reversed ? { reversed: true } : {}),
   }
   const audio = { ...defaultAudio(), ...(raw.audio ?? {}) }
@@ -75,9 +92,22 @@ function normalizeItem(raw) {
 
   switch (raw.type) {
     case 'video':
-      return { ...base, type: 'video', ...timed, ...visual, audio }
+      return { ...base, type: 'video', ...timed, ...visual, audio, ...(raw.animation ? { animation } : {}) }
     case 'image':
-      return { ...base, type: 'image', ...visual }
+      return { ...base, type: 'image', ...visual, ...(raw.animation ? { animation } : {}) }
+    case 'blur':
+      return {
+        ...base,
+        type: 'blur',
+        transform: visual.transform,
+        opacity: visual.opacity,
+        ...(visual.keyframes ? { keyframes: visual.keyframes } : {}),
+        shape: raw.shape === 'rect' ? 'rect' : 'ellipse',
+        mode: raw.mode === 'pixelate' ? 'pixelate' : 'blur',
+        amount: Math.min(1, Math.max(0, num(raw.amount, 0.5))),
+        invert: Boolean(raw.invert),
+        size: { w: Math.max(0.01, num(raw.size?.w, 0.35)), h: Math.max(0.01, num(raw.size?.h, 0.2)) },
+      }
     case 'audio':
       return { ...base, type: 'audio', ...timed, audio, loop: Boolean(raw.loop) }
     case 'text':
@@ -152,5 +182,11 @@ export function normalizeProject(raw) {
     tracks,
     savedTextStyles: Array.isArray(raw.savedTextStyles) ? raw.savedTextStyles : [],
     savedCaptionStyles: Array.isArray(raw.savedCaptionStyles) ? raw.savedCaptionStyles : [],
+    markers: Array.isArray(raw.markers)
+      ? raw.markers
+          .filter((m) => m && Number.isFinite(m.t))
+          .map((m) => ({ id: typeof m.id === 'string' ? m.id : createId(), t: Math.max(0, m.t), label: typeof m.label === 'string' ? m.label : '', color: typeof m.color === 'string' ? m.color : '#ffb547' }))
+          .sort((a, b) => a.t - b.t)
+      : [],
   }
 }

@@ -1,6 +1,6 @@
 <script setup>
-import { ClipboardType, FileUp, Merge, Mic, Scissors, Trash2, Wand2 } from 'lucide-vue-next'
-import { formatTimecode } from '~/core/time'
+import { textPreviewStyle } from '~/composables/useTextPreview'
+import { ClipboardType, FileUp, Mic, Trash2, Wand2 } from 'lucide-vue-next'
 import { useCaptionsStore } from '~/stores/captions'
 import { useEditorStore } from '~/stores/editor'
 import { useProjectStore } from '~/stores/project'
@@ -23,6 +23,25 @@ const positions = [
 ]
 
 onMounted(() => captions.syncFromProject())
+
+// Long videos can have hundreds of phrases: render them in pages.
+const PAGE = 60
+const windowStart = ref(0)
+const windowEnd = ref(PAGE)
+const visibleItems = computed(() => captions.items.slice(windowStart.value, windowEnd.value))
+const selectedIds = computed(() => new Set(editor.selection))
+
+/** Shows the page of phrases around the playhead. */
+function jumpToPlayhead() {
+  const t = editor.currentTime()
+  const index = Math.max(0, captions.items.findIndex((i) => i.start + i.duration >= t))
+  windowStart.value = Math.max(0, index - 5)
+  windowEnd.value = windowStart.value + PAGE
+}
+
+const focusRow = (item) => editor.select([item.id])
+const onStart = (item, v) => setTiming(item, 'start', v)
+const onEnd = (item, v) => setTiming(item, 'end', v)
 
 async function importFile() {
   const [file] = await pickFiles({ multiple: false, accept: '.srt,.vtt,.txt,text/plain' })
@@ -88,15 +107,18 @@ async function clearAll() {
 
       <div>
         <span class="label">Style</span>
-        <div class="grid grid-cols-3 gap-1">
+        <div class="grid grid-cols-3 gap-1.5">
           <button
             v-for="preset in captions.presets"
             :key="preset.id"
             type="button"
-            class="h-8 rounded-lg border border-line px-1 text-[10px] text-muted hover:border-accent hover:text-accent coarse:h-10"
+            class="flex flex-col items-center gap-1 rounded-lg border border-line bg-[#2a2a36] p-1 text-[10px] text-muted hover:border-accent hover:text-accent"
             @click="captions.applyPreset(preset)"
           >
-            {{ preset.label }}
+            <span class="grid h-8 w-full place-items-center overflow-hidden rounded-md text-xs uppercase" :style="textPreviewStyle(preset.style)">
+              <span>Hey <span :style="{ color: preset.style.highlight === 'box' ? preset.style.color : preset.style.activeColor, background: preset.style.highlight === 'box' ? preset.style.activeBackground : undefined, WebkitTextFillColor: preset.style.highlight === 'box' ? undefined : preset.style.activeColor }">you</span></span>
+            </span>
+            <span class="w-full truncate text-center">{{ preset.label }}</span>
           </button>
         </div>
       </div>
@@ -133,37 +155,31 @@ async function clearAll() {
         Every phrase becomes a clip on the captions track that you can edit and restyle.
       </div>
 
-      <ul v-else class="space-y-1.5">
-        <li
-          v-for="item in captions.items"
-          :key="item.id"
-          class="rounded-xl border p-2"
-          :class="editor.selection.includes(item.id) ? 'border-accent bg-accent/5' : 'border-line bg-panel-2'"
-        >
-          <div class="flex items-center gap-1 text-[11px] text-muted">
-            <button type="button" class="font-mono hover:text-accent" @click="seekTo(item)">
-              {{ formatTimecode(item.start, fps) }}
-            </button>
-            <span>→</span>
-            <span class="font-mono">{{ formatTimecode(item.start + item.duration, fps) }}</span>
-            <span class="flex-1" />
-            <UiIconButton :icon="Scissors" label="Split phrase" size="sm" @click="splitHere(item)" />
-            <UiIconButton :icon="Merge" label="Merge with next" size="sm" @click="mergeNext(item)" />
-            <UiIconButton :icon="Trash2" label="Delete phrase" size="sm" @click="remove(item)" />
-          </div>
-          <textarea
-            :value="item.text"
-            rows="2"
-            class="field mt-1 h-auto py-1 text-xs leading-snug"
-            @input="setText(item, $event.target.value)"
-            @focus="editor.select([item.id])"
+      <template v-else>
+        <div v-if="captions.count > PAGE" class="mb-2 flex items-center gap-2 text-[11px] text-muted">
+          <span class="flex-1">Showing {{ windowStart + 1 }}–{{ windowStart + visibleItems.length }} of {{ captions.count }}</span>
+          <button v-if="windowStart > 0" type="button" class="text-accent" @click="windowStart = Math.max(0, windowStart - PAGE)">Earlier</button>
+          <button type="button" class="text-accent" @click="jumpToPlayhead">Around the playhead</button>
+        </div>
+        <ul class="space-y-1.5">
+          <CaptionsRow
+            v-for="item in visibleItems"
+            :key="item.id"
+            :item="item"
+            :fps="fps"
+            :selected="selectedIds.has(item.id)"
+            @seek="seekTo"
+            @split="splitHere"
+            @merge="mergeNext"
+            @remove="remove"
+            @text="setText"
+            @focus="focusRow"
+            @start="onStart"
+            @end="onEnd"
           />
-          <div class="mt-1 grid grid-cols-2 gap-1.5">
-            <UiTimeField :model-value="item.start" :fps="fps" @commit="(v) => setTiming(item, 'start', v)" />
-            <UiTimeField :model-value="item.start + item.duration" :fps="fps" :min="item.start + 0.1" @commit="(v) => setTiming(item, 'end', v)" />
-          </div>
-        </li>
-      </ul>
+        </ul>
+        <UiButton v-if="windowEnd < captions.count" size="sm" block class="mt-2" @click="windowEnd += PAGE">Show more</UiButton>
+      </template>
 
       <UiButton v-if="captions.count > 0" size="sm" variant="danger" block class="mt-3" :icon="Trash2" @click="clearAll">
         Remove all captions

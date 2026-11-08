@@ -26,11 +26,17 @@ export const FORMAT_PRESETS = [
   { id: '16:9', label: '16:9', description: 'YouTube', width: 1920, height: 1080 },
   { id: '1:1', label: '1:1', description: 'Square', width: 1080, height: 1080 },
   { id: '4:5', label: '4:5', description: 'Instagram', width: 1080, height: 1350 },
+  { id: '4k', label: '4K', description: 'YouTube 4K', width: 3840, height: 2160 },
+  { id: '4:3', label: '4:3', description: 'Classic', width: 1440, height: 1080 },
+  { id: '21:9', label: '21:9', description: 'Cinema', width: 2560, height: 1080 },
 ]
 
 export const FPS_OPTIONS = [24, 25, 30, 50, 60]
 
-export const SPEED_PRESETS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 4]
+export const SPEED_PRESETS = [0.1, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4, 8, 16]
+
+export const MIN_SPEED = 0.1
+export const MAX_SPEED = 16
 
 export const DEFAULT_IMAGE_DURATION = 3
 export const DEFAULT_TEXT_DURATION = 3
@@ -46,6 +52,12 @@ export const SYSTEM_FONTS = [
   { id: 'Comic Sans MS', label: 'Comic Sans', stack: '"Comic Sans MS", "Comic Sans", cursive' },
   { id: 'Trebuchet MS', label: 'Trebuchet', stack: '"Trebuchet MS", Tahoma, sans-serif' },
   { id: 'Verdana', label: 'Verdana', stack: 'Verdana, Geneva, sans-serif' },
+  { id: 'Times New Roman', label: 'Times', stack: '"Times New Roman", Times, serif' },
+  { id: 'Brush Script MT', label: 'Brush script', stack: '"Brush Script MT", "Segoe Script", cursive' },
+  { id: 'Palatino', label: 'Palatino', stack: 'Palatino, "Palatino Linotype", "Book Antiqua", serif' },
+  { id: 'Futura', label: 'Futura', stack: 'Futura, "Century Gothic", "Avenir Next", sans-serif' },
+  { id: 'Rockwell', label: 'Rockwell', stack: 'Rockwell, "Courier Bold", serif' },
+  { id: 'monospace', label: 'Mono', stack: 'ui-monospace, "SF Mono", "Roboto Mono", Menlo, monospace' },
 ]
 
 /** Resolves a font family name to a CSS font stack (custom fonts pass through). */
@@ -97,6 +109,7 @@ export function createProject(name, settings = {}) {
     settings: defaultSettings(settings),
     assets: {},
     tracks: [createTrack('visual', 'Video 1'), createTrack('audio', 'Audio 1')],
+    markers: [],
     savedTextStyles: [],
     savedCaptionStyles: [],
   }
@@ -124,8 +137,28 @@ export function neutralEffects() {
     sepia: 0,
     invert: 0,
     vignette: 0,
+    grain: 0,
+    temperature: 0,
   }
 }
+
+/** @returns {import('./types').Motion} */
+export function defaultMotion() {
+  return { kind: 'none', amount: 0.5 }
+}
+
+/** @type {{ id: import('./types').MotionKind, label: string }[]} */
+export const MOTIONS = [
+  { id: 'none', label: 'None' },
+  { id: 'zoomIn', label: 'Zoom in' },
+  { id: 'zoomOut', label: 'Zoom out' },
+  { id: 'panLeft', label: 'Pan left' },
+  { id: 'panRight', label: 'Pan right' },
+  { id: 'panUp', label: 'Pan up' },
+  { id: 'panDown', label: 'Pan down' },
+  { id: 'shake', label: 'Shake' },
+  { id: 'pulse', label: 'Pulse' },
+]
 
 /** @returns {import('./types').AudioProps} */
 export function defaultAudio() {
@@ -146,6 +179,16 @@ export const FILTER_PRESETS = [
   { id: 'cinematic', label: 'Cinematic', effects: { contrast: 1.2, saturation: 0.9, brightness: 0.97, vignette: 0.25 } },
   { id: 'punch', label: 'High contrast', effects: { contrast: 1.4, saturation: 1.25 } },
   { id: 'dream', label: 'Dreamy', effects: { brightness: 1.12, saturation: 1.1, blur: 1.5 } },
+  { id: 'vivid', label: 'Vivid', effects: { saturation: 1.45, contrast: 1.12, brightness: 1.03 } },
+  { id: 'golden', label: 'Golden hour', effects: { temperature: 0.55, saturation: 1.15, brightness: 1.04, vignette: 0.2 } },
+  { id: 'teal', label: 'Teal & orange', effects: { temperature: 0.25, contrast: 1.18, saturation: 1.2, hue: -6 } },
+  { id: 'moody', label: 'Moody', effects: { brightness: 0.88, contrast: 1.25, saturation: 0.75, vignette: 0.45, temperature: -0.2 } },
+  { id: 'noir', label: 'Noir', effects: { grayscale: 1, contrast: 1.5, brightness: 0.92, vignette: 0.55, grain: 0.25 } },
+  { id: 'film', label: 'Film', effects: { contrast: 1.08, saturation: 0.9, sepia: 0.12, grain: 0.35, vignette: 0.2 } },
+  { id: 'faded', label: 'Faded', effects: { contrast: 0.82, brightness: 1.08, saturation: 0.8 } },
+  { id: 'arctic', label: 'Arctic', effects: { temperature: -0.6, brightness: 1.06, saturation: 0.9 } },
+  { id: 'retro', label: 'Retro', effects: { sepia: 0.3, hue: -12, saturation: 1.3, contrast: 1.1, grain: 0.2 } },
+  { id: 'pop', label: 'Pop art', effects: { saturation: 2.2, contrast: 1.35, hue: 8 } },
 ]
 
 export function applyFilterPreset(id) {
@@ -165,8 +208,18 @@ export const TRANSITIONS = [
   { id: 'dipBlack', label: 'Dip to black' },
   { id: 'dipWhite', label: 'Dip to white' },
   { id: 'slide', label: 'Slide', needsDirection: true },
+  { id: 'push', label: 'Push', needsDirection: true },
   { id: 'wipe', label: 'Wipe', needsDirection: true },
-  { id: 'zoom', label: 'Zoom' },
+  { id: 'whip', label: 'Whip pan', needsDirection: true },
+  { id: 'zoom', label: 'Zoom in' },
+  { id: 'zoomOut', label: 'Zoom out' },
+  { id: 'blur', label: 'Blur' },
+  { id: 'spin', label: 'Spin' },
+  { id: 'flash', label: 'Flash' },
+  { id: 'iris', label: 'Circle' },
+  { id: 'doors', label: 'Doors' },
+  { id: 'clock', label: 'Clock' },
+  { id: 'glitch', label: 'Glitch' },
 ]
 
 export const DEFAULT_TRANSITION_DURATION = 0.5
@@ -192,6 +245,14 @@ export function defaultTextStyle(overrides = {}) {
     stroke: { color: '#000000', width: 0 },
     shadow: { color: '#000000', blur: 0.25, offsetX: 0, offsetY: 0.06, opacity: 0.55 },
     background: { color: '#000000', opacity: 0, padding: 0.35, radius: 0.3 },
+    /** Second colour of a vertical gradient fill, or null for a solid fill. */
+    gradientColor: null,
+    /** Draws only the stroke (hollow letters). */
+    outlineOnly: false,
+    /** Second, outer outline. */
+    stroke2: { color: '#ffffff', width: 0 },
+    /** Looping effect: none | wavy | shake | glitch | rgbSplit | extrude | rainbow | flicker */
+    effect: 'none',
     ...overrides,
   }
 }
@@ -274,6 +335,146 @@ export const TEXT_PRESETS = [
     }),
     animation: defaultTextAnimation({ in: { kind: 'none', duration: 0 }, out: { kind: 'none', duration: 0 } }),
   },
+  {
+    id: 'impact',
+    label: 'Meme',
+    style: defaultTextStyle({
+      fontFamily: 'Impact',
+      fontWeight: 400,
+      fontSize: 0.075,
+      uppercase: true,
+      stroke: { color: '#000000', width: 0.12 },
+      shadow: { color: '#000000', blur: 0, offsetX: 0, offsetY: 0, opacity: 0 },
+    }),
+    animation: defaultTextAnimation({ in: { kind: 'pop', duration: 0.25 } }),
+  },
+  {
+    id: 'yellow',
+    label: 'Yellow punch',
+    style: defaultTextStyle({
+      color: '#ffe14d',
+      fontWeight: 900,
+      fontSize: 0.068,
+      uppercase: true,
+      stroke: { color: '#000000', width: 0.16 },
+      shadow: { color: '#000000', blur: 0.05, offsetX: 0, offsetY: 0.08, opacity: 0.9 },
+    }),
+    animation: defaultTextAnimation({ in: { kind: 'bounce', duration: 0.4 } }),
+  },
+  {
+    id: 'gradient',
+    label: 'Gradient',
+    style: defaultTextStyle({
+      color: '#ff7ae0',
+      gradientColor: '#5b8cff',
+      fontWeight: 900,
+      fontSize: 0.07,
+      shadow: { color: '#000000', blur: 0.3, offsetX: 0, offsetY: 0.05, opacity: 0.5 },
+    }),
+    animation: defaultTextAnimation({ in: { kind: 'rise', duration: 0.4 } }),
+  },
+  {
+    id: 'retro',
+    label: 'Retro 3D',
+    style: defaultTextStyle({
+      fontFamily: 'Arial Black',
+      color: '#ffcf33',
+      fontWeight: 900,
+      fontSize: 0.068,
+      uppercase: true,
+      stroke: { color: '#2b0f3a', width: 0.06 },
+      shadow: { color: '#ff3b8d', blur: 0, offsetX: 0.08, offsetY: 0.08, opacity: 1 },
+    }),
+    animation: defaultTextAnimation({ in: { kind: 'drop', duration: 0.4 } }),
+  },
+  {
+    id: 'glow',
+    label: 'Glow',
+    style: defaultTextStyle({
+      color: '#ffffff',
+      fontWeight: 700,
+      shadow: { color: '#ff3bd1', blur: 0.9, offsetX: 0, offsetY: 0, opacity: 1 },
+    }),
+    animation: defaultTextAnimation({ in: { kind: 'blur', duration: 0.45 }, out: { kind: 'blur', duration: 0.3 } }),
+  },
+  {
+    id: 'outline',
+    label: 'Outline only',
+    style: defaultTextStyle({
+      color: '#ffffff',
+      opacity: 1,
+      fontWeight: 900,
+      fontSize: 0.08,
+      uppercase: true,
+      gradientColor: null,
+      stroke: { color: '#ffffff', width: 0.05 },
+      shadow: { color: '#000000', blur: 0, offsetX: 0, offsetY: 0, opacity: 0 },
+      outlineOnly: true,
+    }),
+    animation: defaultTextAnimation({ in: { kind: 'zoom', duration: 0.35 } }),
+  },
+  {
+    id: 'pill',
+    label: 'Pill',
+    style: defaultTextStyle({
+      color: '#ffffff',
+      fontSize: 0.045,
+      fontWeight: 700,
+      background: { color: '#ff3b5c', opacity: 1, padding: 0.6, radius: 2 },
+      shadow: { color: '#000000', blur: 0, offsetX: 0, offsetY: 0, opacity: 0 },
+    }),
+    animation: defaultTextAnimation({ in: { kind: 'slide', duration: 0.3 } }),
+  },
+  {
+    id: 'news',
+    label: 'Lower third',
+    style: defaultTextStyle({
+      color: '#ffffff',
+      fontSize: 0.04,
+      fontWeight: 700,
+      align: 'left',
+      background: { color: '#1739d6', opacity: 0.95, padding: 0.45, radius: 0.08 },
+      shadow: { color: '#000000', blur: 0, offsetX: 0, offsetY: 0, opacity: 0 },
+    }),
+    animation: defaultTextAnimation({ in: { kind: 'slideLeft', duration: 0.35 }, out: { kind: 'fade', duration: 0.25 } }),
+  },
+  {
+    id: 'typewriter',
+    label: 'Typewriter',
+    style: defaultTextStyle({
+      fontFamily: 'Courier New',
+      fontWeight: 700,
+      fontSize: 0.045,
+      color: '#f5f5f5',
+      shadow: { color: '#000000', blur: 0.2, offsetX: 0, offsetY: 0.03, opacity: 0.7 },
+    }),
+    animation: defaultTextAnimation({ in: { kind: 'typewriter', duration: 1.2 }, out: { kind: 'fade', duration: 0.2 } }),
+  },
+  {
+    id: 'elegant',
+    label: 'Elegant',
+    style: defaultTextStyle({
+      fontFamily: 'Georgia',
+      fontWeight: 400,
+      italic: true,
+      fontSize: 0.055,
+      letterSpacing: 0.04,
+      shadow: { color: '#000000', blur: 0.4, offsetX: 0, offsetY: 0.02, opacity: 0.5 },
+    }),
+    animation: defaultTextAnimation({ in: { kind: 'blur', duration: 0.6 }, out: { kind: 'fade', duration: 0.4 } }),
+  },
+  {
+    id: 'wave',
+    label: 'Wave',
+    style: defaultTextStyle({
+      color: '#7dfcff',
+      fontWeight: 900,
+      fontSize: 0.065,
+      uppercase: true,
+      stroke: { color: '#06242b', width: 0.1 },
+    }),
+    animation: defaultTextAnimation({ in: { kind: 'wave', duration: 0.6 } }),
+  },
 ]
 
 /** Ready-made caption looks (TikTok / Shorts style). */
@@ -338,6 +539,216 @@ export const CAPTION_PRESETS = [
     animation: defaultTextAnimation({ in: { kind: 'fade', duration: 0.12 }, out: { kind: 'none', duration: 0 } }),
     position: { x: 0.5, y: 0.75 },
   },
+  {
+    id: 'hormozi',
+    label: 'Bold green',
+    style: defaultCaptionStyle({
+      highlight: 'pop',
+      fontFamily: 'Arial Black',
+      fontWeight: 900,
+      fontSize: 0.062,
+      activeColor: '#3dff6e',
+      activeScale: 1.2,
+      stroke: { color: '#000000', width: 0.18 },
+      shadow: { color: '#000000', blur: 0.05, offsetX: 0, offsetY: 0.08, opacity: 0.9 },
+    }),
+    animation: defaultTextAnimation({ in: { kind: 'pop', duration: 0.15 }, out: { kind: 'none', duration: 0 } }),
+    position: { x: 0.5, y: 0.7 },
+  },
+  {
+    id: 'yellow-word',
+    label: 'Yellow word',
+    style: defaultCaptionStyle({
+      highlight: 'color',
+      fontFamily: 'Impact',
+      fontWeight: 400,
+      fontSize: 0.07,
+      activeColor: '#ffe14d',
+      stroke: { color: '#000000', width: 0.14 },
+    }),
+    animation: defaultTextAnimation({ in: { kind: 'zoom', duration: 0.15 }, out: { kind: 'none', duration: 0 } }),
+    position: { x: 0.5, y: 0.72 },
+  },
+  {
+    id: 'underline',
+    label: 'Underline',
+    style: defaultCaptionStyle({
+      highlight: 'underline',
+      uppercase: false,
+      fontWeight: 800,
+      activeColor: '#ff3b5c',
+      stroke: { color: '#000000', width: 0.08 },
+    }),
+    animation: defaultTextAnimation({ in: { kind: 'rise', duration: 0.18 }, out: { kind: 'none', duration: 0 } }),
+    position: { x: 0.5, y: 0.78 },
+  },
+  {
+    id: 'glow',
+    label: 'Neon glow',
+    style: defaultCaptionStyle({
+      highlight: 'glow',
+      color: '#ffffff',
+      activeColor: '#ff3bd1',
+      stroke: { color: '#000000', width: 0 },
+      shadow: { color: '#000000', blur: 0.3, offsetX: 0, offsetY: 0, opacity: 0.6 },
+    }),
+    animation: defaultTextAnimation({ in: { kind: 'fade', duration: 0.12 }, out: { kind: 'none', duration: 0 } }),
+    position: { x: 0.5, y: 0.78 },
+  },
+  {
+    id: 'reveal',
+    label: 'Word reveal',
+    style: defaultCaptionStyle({
+      highlight: 'reveal',
+      fontWeight: 900,
+      fontSize: 0.058,
+      activeColor: '#ffffff',
+      stroke: { color: '#000000', width: 0.14 },
+    }),
+    animation: defaultTextAnimation({ in: { kind: 'none', duration: 0 }, out: { kind: 'none', duration: 0 } }),
+    position: { x: 0.5, y: 0.74 },
+  },
+  {
+    id: 'pill',
+    label: 'Pill word',
+    style: defaultCaptionStyle({
+      highlight: 'box',
+      uppercase: false,
+      fontWeight: 800,
+      fontSize: 0.05,
+      activeBackground: '#7c4dff',
+      stroke: { color: '#000000', width: 0 },
+      background: { color: '#ffffff', opacity: 0.95, padding: 0.4, radius: 1 },
+      color: '#111111',
+      shadow: { color: '#000000', blur: 0.3, offsetX: 0, offsetY: 0.05, opacity: 0.35 },
+    }),
+    animation: defaultTextAnimation({ in: { kind: 'pop', duration: 0.18 }, out: { kind: 'none', duration: 0 } }),
+    position: { x: 0.5, y: 0.78 },
+  },
+]
+
+const T = (overrides, animIn = 'pop', duration = 0.3) => ({
+  style: defaultTextStyle(overrides),
+  animation: defaultTextAnimation({ in: { kind: animIn, duration } }),
+})
+
+TEXT_PRESETS.push(
+  { id: 'double-outline', label: 'Double outline', ...T({ fontFamily: 'Arial Black', fontWeight: 900, fontSize: 0.07, uppercase: true, color: '#ffffff', stroke: { color: '#ff2b6a', width: 0.1 }, stroke2: { color: '#ffffff', width: 0.08 }, shadow: { color: '#000000', blur: 0.2, offsetX: 0, offsetY: 0.06, opacity: 0.6 } }) },
+  { id: 'comic', label: 'Comic', ...T({ fontFamily: 'Comic Sans MS', fontWeight: 900, fontSize: 0.07, color: '#ffe14d', stroke: { color: '#000000', width: 0.12 }, stroke2: { color: '#ff3b5c', width: 0.08 }, effect: 'none' }, 'bounce', 0.4) },
+  { id: 'glitch', label: 'Glitch', ...T({ fontFamily: 'Impact', fontWeight: 400, fontSize: 0.075, uppercase: true, color: '#ffffff', effect: 'glitch', shadow: { color: '#000000', blur: 0, offsetX: 0, offsetY: 0, opacity: 0 } }, 'zoom', 0.25) },
+  { id: 'rgb', label: 'RGB split', ...T({ fontFamily: 'Arial Black', fontWeight: 900, fontSize: 0.068, uppercase: true, color: '#ffffff', effect: 'rgbSplit' }, 'blur', 0.4) },
+  { id: '3d', label: '3D block', ...T({ fontFamily: 'Impact', fontWeight: 400, fontSize: 0.085, uppercase: true, color: '#ffde3b', effect: 'extrude', stroke: { color: '#1a1a1a', width: 0.04 }, shadow: { color: '#c2410c', blur: 0, offsetX: 0, offsetY: 0, opacity: 0 } }, 'drop', 0.45) },
+  { id: 'rainbow', label: 'Rainbow', ...T({ fontWeight: 900, fontSize: 0.07, uppercase: true, effect: 'rainbow', stroke: { color: '#000000', width: 0.1 } }, 'wave', 0.6) },
+  { id: 'wavy', label: 'Wavy', ...T({ fontFamily: 'Trebuchet MS', fontWeight: 800, fontSize: 0.065, color: '#9dffb0', effect: 'wavy', stroke: { color: '#06331a', width: 0.1 } }, 'wave', 0.6) },
+  { id: 'shaky', label: 'Shaky', ...T({ fontFamily: 'Impact', fontWeight: 400, fontSize: 0.08, uppercase: true, color: '#ff3b3b', effect: 'shake', stroke: { color: '#000000', width: 0.12 } }, 'zoom', 0.2) },
+  { id: 'flicker', label: 'Neon flicker', ...T({ fontFamily: 'Futura', fontWeight: 600, color: '#ff4fd8', effect: 'flicker', shadow: { color: '#ff4fd8', blur: 0.9, offsetX: 0, offsetY: 0, opacity: 1 }, stroke2: { color: '#ffffff', width: 0 } }, 'fade', 0.5) },
+  { id: 'sticker', label: 'Sticker', ...T({ fontFamily: 'Arial Black', fontWeight: 900, fontSize: 0.06, color: '#111111', stroke: { color: '#ffffff', width: 0.22 }, shadow: { color: '#000000', blur: 0.3, offsetX: 0.03, offsetY: 0.08, opacity: 0.5 } }, 'pop', 0.35) },
+  { id: 'handwritten', label: 'Handwritten', ...T({ fontFamily: 'Brush Script MT', fontWeight: 400, fontSize: 0.085, color: '#ffffff', shadow: { color: '#000000', blur: 0.25, offsetX: 0, offsetY: 0.04, opacity: 0.6 } }, 'typewriter', 0.9) },
+  { id: 'serif-gold', label: 'Gold serif', ...T({ fontFamily: 'Palatino', fontWeight: 700, fontSize: 0.065, color: '#fff3b0', gradientColor: '#c9971c', letterSpacing: 0.06, uppercase: true, shadow: { color: '#000000', blur: 0.35, offsetX: 0, offsetY: 0.04, opacity: 0.6 } }, 'blur', 0.6) },
+  { id: 'mono-tag', label: 'Code tag', ...T({ fontFamily: 'monospace', fontWeight: 700, fontSize: 0.042, color: '#3dff6e', background: { color: '#0b0f0c', opacity: 0.9, padding: 0.5, radius: 0.15 }, shadow: { color: '#000000', blur: 0, offsetX: 0, offsetY: 0, opacity: 0 } }, 'typewriter', 0.8) },
+  { id: 'highlighter', label: 'Highlighter', ...T({ fontFamily: 'Rockwell', fontWeight: 700, fontSize: 0.05, color: '#111111', background: { color: '#fff23d', opacity: 1, padding: 0.3, radius: 0.05 }, shadow: { color: '#000000', blur: 0, offsetX: 0, offsetY: 0, opacity: 0 } }, 'slideLeft', 0.3) },
+  { id: 'cinema', label: 'Cinema title', ...T({ fontFamily: 'Times New Roman', fontWeight: 400, fontSize: 0.06, letterSpacing: 0.3, uppercase: true, color: '#f5f0e6', shadow: { color: '#000000', blur: 0.5, offsetX: 0, offsetY: 0, opacity: 0.6 } }, 'blur', 1.2) },
+  { id: 'red-box', label: 'Breaking', ...T({ fontFamily: 'Arial Black', fontWeight: 900, fontSize: 0.05, uppercase: true, color: '#ffffff', background: { color: '#e11d2e', opacity: 1, padding: 0.4, radius: 0 }, shadow: { color: '#000000', blur: 0, offsetX: 0.04, offsetY: 0.04, opacity: 1 } }, 'slideLeft', 0.3) },
+)
+
+CAPTION_PRESETS.push(
+  { id: 'rainbow', label: 'Rainbow', style: defaultCaptionStyle({ highlight: 'scale', effect: 'rainbow', fontWeight: 900, stroke: { color: '#000000', width: 0.14 } }), animation: defaultTextAnimation({ in: { kind: 'pop', duration: 0.15 }, out: { kind: 'none', duration: 0 } }), position: { x: 0.5, y: 0.74 } },
+  { id: 'wavy', label: 'Wavy', style: defaultCaptionStyle({ highlight: 'color', effect: 'wavy', activeColor: '#7dfcff', fontFamily: 'Trebuchet MS', stroke: { color: '#000000', width: 0.12 } }), animation: defaultTextAnimation({ in: { kind: 'fade', duration: 0.12 }, out: { kind: 'none', duration: 0 } }), position: { x: 0.5, y: 0.76 } },
+  { id: 'comic', label: 'Comic', style: defaultCaptionStyle({ highlight: 'bounce', fontFamily: 'Comic Sans MS', fontWeight: 900, color: '#ffffff', activeColor: '#ffe14d', stroke: { color: '#000000', width: 0.12 }, stroke2: { color: '#ff3b5c', width: 0.06 } }), animation: defaultTextAnimation({ in: { kind: 'pop', duration: 0.18 }, out: { kind: 'none', duration: 0 } }), position: { x: 0.5, y: 0.74 } },
+  { id: 'glitch', label: 'Glitch', style: defaultCaptionStyle({ highlight: 'color', effect: 'glitch', fontFamily: 'Impact', fontWeight: 400, fontSize: 0.065, activeColor: '#00e5ff', stroke: { color: '#000000', width: 0.1 } }), animation: defaultTextAnimation({ in: { kind: 'zoom', duration: 0.12 }, out: { kind: 'none', duration: 0 } }), position: { x: 0.5, y: 0.72 } },
+  { id: '3d', label: '3D', style: defaultCaptionStyle({ highlight: 'pop', effect: 'extrude', fontFamily: 'Impact', fontWeight: 400, fontSize: 0.07, color: '#ffffff', activeColor: '#ffde3b', stroke: { color: '#000000', width: 0.05 }, shadow: { color: '#7c2d12', blur: 0, offsetX: 0, offsetY: 0, opacity: 0 } }), animation: defaultTextAnimation({ in: { kind: 'pop', duration: 0.15 }, out: { kind: 'none', duration: 0 } }), position: { x: 0.5, y: 0.72 } },
+  { id: 'serif', label: 'Serif', style: defaultCaptionStyle({ highlight: 'underline', uppercase: false, fontFamily: 'Georgia', fontWeight: 700, activeColor: '#ffd166', stroke: { color: '#000000', width: 0.06 } }), animation: defaultTextAnimation({ in: { kind: 'fade', duration: 0.15 }, out: { kind: 'none', duration: 0 } }), position: { x: 0.5, y: 0.8 } },
+)
+
+/** Looping text effects. */
+export const TEXT_EFFECTS = [
+  { id: 'none', label: 'None' },
+  { id: 'wavy', label: 'Wavy' },
+  { id: 'shake', label: 'Shake' },
+  { id: 'glitch', label: 'Glitch' },
+  { id: 'rgbSplit', label: 'RGB split' },
+  { id: 'extrude', label: '3D' },
+  { id: 'rainbow', label: 'Rainbow' },
+  { id: 'flicker', label: 'Flicker' },
+]
+
+/** Blend modes for overlays (canvas composite operations). */
+export const BLEND_MODES = [
+  { id: 'normal', label: 'Normal' },
+  { id: 'multiply', label: 'Multiply' },
+  { id: 'screen', label: 'Screen' },
+  { id: 'overlay', label: 'Overlay' },
+  { id: 'darken', label: 'Darken' },
+  { id: 'lighten', label: 'Lighten' },
+  { id: 'color-dodge', label: 'Colour dodge' },
+  { id: 'soft-light', label: 'Soft light' },
+  { id: 'difference', label: 'Difference' },
+  { id: 'luminosity', label: 'Luminosity' },
+]
+
+/** Enter/exit animations for video and photo clips. */
+export const CLIP_ANIMATIONS = [
+  { id: 'none', label: 'None' },
+  { id: 'fade', label: 'Fade' },
+  { id: 'pop', label: 'Pop' },
+  { id: 'zoom', label: 'Zoom' },
+  { id: 'slide', label: 'Slide up' },
+  { id: 'slideLeft', label: 'Slide side' },
+  { id: 'rise', label: 'Rise' },
+  { id: 'drop', label: 'Drop' },
+  { id: 'blur', label: 'Blur' },
+  { id: 'spin', label: 'Spin' },
+  { id: 'bounce', label: 'Bounce' },
+]
+
+/**
+ * @param {{ start?: number, duration?: number, mode?: 'blur' | 'pixelate', invert?: boolean, shape?: 'rect' | 'ellipse' }} [options]
+ */
+export function createBlurItem(options = {}) {
+  return {
+    id: createId(),
+    type: 'blur',
+    name: options.mode === 'pixelate' ? 'Pixelate' : options.invert ? 'Background blur' : 'Blur',
+    start: options.start ?? 0,
+    duration: options.duration ?? DEFAULT_TEXT_DURATION,
+    shape: options.shape ?? 'ellipse',
+    mode: options.mode ?? 'blur',
+    amount: 0.5,
+    invert: !!options.invert,
+    size: options.invert ? { w: 0.6, h: 0.45 } : { w: 0.35, h: 0.2 },
+    transform: defaultTransform(),
+    opacity: 1,
+  }
+}
+
+/** Text enter/exit animations. */
+export const TEXT_ANIMATIONS = [
+  { id: 'none', label: 'None' },
+  { id: 'fade', label: 'Fade' },
+  { id: 'pop', label: 'Pop' },
+  { id: 'slide', label: 'Slide up' },
+  { id: 'slideLeft', label: 'Slide side' },
+  { id: 'rise', label: 'Rise' },
+  { id: 'drop', label: 'Drop' },
+  { id: 'zoom', label: 'Zoom' },
+  { id: 'blur', label: 'Blur' },
+  { id: 'spin', label: 'Spin' },
+  { id: 'bounce', label: 'Bounce' },
+  { id: 'wave', label: 'Wave' },
+  { id: 'typewriter', label: 'Type' },
+]
+
+/** Active-word highlight modes for captions. */
+export const CAPTION_HIGHLIGHTS = [
+  { id: 'none', label: 'None' },
+  { id: 'color', label: 'Colour' },
+  { id: 'box', label: 'Box' },
+  { id: 'scale', label: 'Scale' },
+  { id: 'pop', label: 'Pop' },
+  { id: 'bounce', label: 'Bounce' },
+  { id: 'underline', label: 'Underline' },
+  { id: 'glow', label: 'Glow' },
+  { id: 'reveal', label: 'Reveal' },
 ]
 
 // ---------------------------------------------------------------------------

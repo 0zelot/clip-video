@@ -1,5 +1,6 @@
 <script setup>
 import { ChevronDown } from 'lucide-vue-next'
+import { useEditorStore } from '~/stores/editor'
 
 const props = defineProps({
   title: { type: String, required: true },
@@ -8,7 +9,9 @@ const props = defineProps({
   defaultOpen: { type: Boolean, default: true },
 })
 
-const open = ref(props.defaultOpen)
+const editor = useEditorStore()
+// A single focused section (mobile tool sheet) is always expanded.
+const open = ref(props.defaultOpen || (editor.mobilePanel === 'properties' && !!editor.propertiesFocus))
 </script>
 
 <template>

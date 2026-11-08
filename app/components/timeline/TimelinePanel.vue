@@ -1,5 +1,5 @@
 <script setup>
-import { Plus } from 'lucide-vue-next'
+import { Music, Plus, Video } from 'lucide-vue-next'
 import { collectSnapPoints, snapEdges } from '~/core/operations/snap'
 import { MAX_ZOOM, MIN_ZOOM, useEditorStore } from '~/stores/editor'
 import { useMediaStore } from '~/stores/media'
@@ -11,7 +11,6 @@ const editor = useEditorStore()
 const media = useMediaStore()
 const commands = useEditorCommands()
 
-const RULER_HEIGHT = 28
 const TRAILING_SECONDS = 4
 
 const scroller = ref(null)
@@ -21,7 +20,13 @@ const headers = ref(null)
 const snapIndicator = ref(null)
 
 const coarse = useMediaQuery('(pointer: coarse)')
+const narrow = useMediaQuery('(max-width: 639px)')
 const viewport = shallowRef({ scrollLeft: 0, width: 0 })
+const RULER_HEIGHT = computed(() => (coarse.value ? 34 : 28))
+/** Width of the scroller, used for the side padding of the centred-playhead mode. */
+const scrollerWidth = ref(0)
+const centerMode = computed(() => editor.centerPlayhead)
+const sidePad = computed(() => (centerMode.value ? Math.round(scrollerWidth.value / 2) : 0))
 
 const tracks = computed(() => projectStore.project?.tracks ?? [])
 const trackHeight = (kind) => (kind === 'audio' ? (coarse.value ? 60 : 52) : coarse.value ? 76 : 66)
@@ -49,7 +54,7 @@ function timeAt(clientX) {
 function trackAt(clientY) {
   const el = content.value
   if (!el) return null
-  const y = clientY - el.getBoundingClientRect().top - RULER_HEIGHT
+  const y = clientY - el.getBoundingClientRect().top - RULER_HEIGHT.value
   return trackGeometry.value.find((g) => y >= g.top - 2 && y <= g.top + g.height + 2) ?? null
 }
 
@@ -102,10 +107,19 @@ provide(TIMELINE_CONTEXT, {
 
 // ----- playhead (updated outside of Vue reactivity) --------------------------
 
+/** What the current pointer gesture on the timeline is about ('item' drags must not scrub). */
+let gesture = null
 let followRaf = 0
 usePlaybackTime((time) => {
   const el = playhead.value
   if (el) el.style.transform = `translateX(${time * editor.zoom}px)`
+  if (centerMode.value) {
+    // The timeline moves under the fixed playhead.
+    if (gesture !== 'item' && scroller.value && Math.abs(scroller.value.scrollLeft - time * editor.zoom) >= 1) {
+      scroller.value.scrollLeft = time * editor.zoom
+    }
+    return
+  }
   if (editor.playing && !followRaf) {
     followRaf = requestAnimationFrame(() => {
       followRaf = 0
@@ -131,6 +145,26 @@ watch(
   },
 )
 
+watch(centerMode, () =>
+  nextTick(() => {
+    if (centerMode.value && scroller.value) scroller.value.scrollLeft = editor.currentTime() * editor.zoom
+    onScroll()
+  }),
+)
+
+function onPointerDownCapture(e) {
+  const itemEl = e.target instanceof Element ? e.target.closest('[data-item-id]') : null
+  // On touch, unselected clips let the timeline scroll (see TimelineItem), so that still scrubs.
+  gesture = itemEl && (e.pointerType !== 'touch' || itemEl.getAttribute('aria-pressed') === 'true') ? 'item' : 'scroll'
+  // Touching the timeline stops playback, like in mobile editors.
+  if (centerMode.value && gesture === 'scroll' && editor.playing && e.pointerType === 'touch') editor.engine?.pause()
+}
+function onPointerUpCapture() {
+  const wasItem = gesture === 'item'
+  gesture = null
+  if (wasItem && centerMode.value && scroller.value) scroller.value.scrollLeft = editor.currentTime() * editor.zoom
+}
+
 // ----- scrolling -------------------------------------------------------------
 
 let scrollRaf = 0
@@ -138,9 +172,18 @@ function onScroll() {
   const el = scroller.value
   if (!el) return
   if (headers.value) headers.value.style.transform = `translateY(${-el.scrollTop}px)`
+  // Centred playhead: scrolling the timeline scrubs the video.
+  if (centerMode.value && gesture !== 'item' && !editor.playing && editor.engine) {
+    const t = el.scrollLeft / editor.zoom
+    if (Math.abs(t - editor.engine.time) * editor.zoom >= 1) editor.engine.seek(t)
+  }
   if (!scrollRaf) {
     scrollRaf = requestAnimationFrame(() => {
       scrollRaf = 0
+      const current = viewport.value
+      // Rulers and strips draw a margin around the visible part, so small
+      // scroll steps (e.g. following the playhead) need no re-render.
+      if (Math.abs(current.scrollLeft - el.scrollLeft) < 60 && current.width === el.clientWidth) return
       viewport.value = { scrollLeft: el.scrollLeft, width: el.clientWidth }
     })
   }
@@ -152,6 +195,15 @@ function zoomAt(factor, clientX) {
   const next = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, previous * factor))
   if (!el || next === previous) {
     editor.setZoom(next)
+    return
+  }
+  if (centerMode.value) {
+    // Zoom around the playhead, which stays in the middle.
+    editor.setZoom(next)
+    nextTick(() => {
+      el.scrollLeft = editor.currentTime() * next
+      onScroll()
+    })
     return
   }
   const anchorX = clientX !== undefined ? clientX - el.getBoundingClientRect().left : el.clientWidth / 2
@@ -276,8 +328,10 @@ function zoomToFit() {
   const el = scroller.value
   if (!el || projectStore.duration <= 0) return
   editor.setZoom((el.clientWidth - 40) / projectStore.duration)
-  el.scrollLeft = 0
-  onScroll()
+  nextTick(() => {
+    el.scrollLeft = centerMode.value ? editor.currentTime() * editor.zoom : 0
+    onScroll()
+  })
 }
 
 onMounted(() => {
@@ -287,7 +341,10 @@ onMounted(() => {
   el?.addEventListener('touchstart', onTouchStart, { passive: true })
   el?.addEventListener('touchmove', onTouchMove, { passive: false })
   el?.addEventListener('touchend', onTouchEnd, { passive: true })
-  const ro = new ResizeObserver(() => onScroll())
+  const ro = new ResizeObserver(() => {
+    scrollerWidth.value = el?.clientWidth ?? 0
+    onScroll()
+  })
   if (el) ro.observe(el)
   onBeforeUnmount(() => {
     ro.disconnect()
@@ -299,12 +356,22 @@ onMounted(() => {
   })
 })
 
-const headerWidth = computed(() => (coarse.value ? 116 : 136))
+const headerWidth = computed(() => (narrow.value ? 84 : coarse.value ? 120 : 136))
 const markRange = computed(() => {
   const { markIn, markOut } = editor
   if (markIn === null || markOut === null) return null
   return { left: markIn * editor.zoom, width: (markOut - markIn) * editor.zoom }
 })
+
+function addTrack(kind) {
+  commands.addTrack(kind)
+  // New visual tracks appear at the top, audio tracks at the bottom: show them.
+  nextTick(() => {
+    const el = scroller.value
+    if (el) el.scrollTop = kind === 'visual' ? 0 : el.scrollHeight
+    onScroll()
+  })
+}
 </script>
 
 <template>
@@ -314,7 +381,27 @@ const markRange = computed(() => {
     <div class="flex min-h-0 flex-1">
       <!-- track headers -->
       <div class="relative shrink-0 overflow-hidden border-r border-line bg-panel" :style="{ width: `${headerWidth}px` }">
-        <div class="border-b border-line bg-panel" :style="{ height: `${RULER_HEIGHT}px` }" />
+        <!-- add-track buttons live in the sticky corner, so they never scroll away -->
+        <div class="relative z-10 flex items-center gap-1 border-b border-line bg-panel px-1" :style="{ height: `${RULER_HEIGHT}px` }">
+          <button
+            v-tooltip="'Add video / overlay track'"
+            type="button"
+            class="flex h-[calc(100%-6px)] flex-1 items-center justify-center gap-0.5 rounded-md bg-accent/15 text-[11px] font-semibold text-accent hover:bg-accent/25"
+            aria-label="Add video track"
+            @click="addTrack('visual')"
+          >
+            <Plus class="size-3.5" /><Video class="size-3.5" />
+          </button>
+          <button
+            v-tooltip="'Add audio track'"
+            type="button"
+            class="flex h-[calc(100%-6px)] flex-1 items-center justify-center gap-0.5 rounded-md bg-clip-audio/20 text-[11px] font-semibold text-clip-audio hover:bg-clip-audio/30"
+            aria-label="Add audio track"
+            @click="addTrack('audio')"
+          >
+            <Plus class="size-3.5" /><Music class="size-3.5" />
+          </button>
+        </div>
         <div ref="headers" class="will-change-transform">
           <TimelineTrackHeader
             v-for="geo in trackGeometry"
@@ -323,23 +410,8 @@ const markRange = computed(() => {
             :height="geo.height"
             :can-move-up="geo.index > 0"
             :can-move-down="geo.index < tracks.length - 1"
+            :compact="narrow"
           />
-          <div class="p-1.5">
-            <button
-              type="button"
-              class="flex h-8 w-full items-center justify-center gap-1 rounded-lg border border-dashed border-line text-xs text-muted transition-colors hover:border-accent hover:text-accent"
-              @click="commands.addTrack('visual')"
-            >
-              <Plus class="size-3.5" /> Video
-            </button>
-            <button
-              type="button"
-              class="mt-1.5 flex h-8 w-full items-center justify-center gap-1 rounded-lg border border-dashed border-line text-xs text-muted transition-colors hover:border-accent hover:text-accent"
-              @click="commands.addTrack('audio')"
-            >
-              <Plus class="size-3.5" /> Audio
-            </button>
-          </div>
         </div>
       </div>
 
@@ -348,10 +420,14 @@ const markRange = computed(() => {
         ref="scroller"
         class="relative min-w-0 flex-1 overflow-auto overscroll-x-contain"
         @scroll="onScroll"
+        @pointerdown.capture="onPointerDownCapture"
+        @pointerup.capture="onPointerUpCapture"
+        @pointercancel.capture="onPointerUpCapture"
         @dragover="onDragOver"
         @dragleave="dropHint = null"
         @drop="onDrop"
       >
+        <div :style="{ paddingLeft: `${sidePad}px`, paddingRight: `${sidePad}px`, width: `${contentWidth + sidePad * 2}px` }">
         <div ref="content" class="relative" :style="{ width: `${contentWidth}px`, height: `${tracksHeight + RULER_HEIGHT + 16}px` }">
           <TimelineRuler
             class="sticky top-0 z-20 touch-none"
@@ -388,6 +464,7 @@ const markRange = computed(() => {
             <div class="absolute top-0 bottom-0 -left-px w-0.5 bg-accent" />
             <div class="absolute -top-0 -left-[7px] size-3.5 rounded-b-sm bg-accent" style="clip-path: polygon(0 0, 100% 0, 50% 100%)" />
           </div>
+        </div>
         </div>
       </div>
     </div>

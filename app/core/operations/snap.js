@@ -10,7 +10,7 @@ import { itemEnd } from '../time'
  */
 export function collectSnapPoints(project, exclude, extra = []) {
   const excluded = new Set(exclude)
-  const points = new Set([0, ...extra])
+  const points = new Set([0, ...extra, ...(project.markers ?? []).map((m) => m.t)])
   for (const track of project.tracks) {
     for (const item of track.items) {
       if (excluded.has(item.id)) continue

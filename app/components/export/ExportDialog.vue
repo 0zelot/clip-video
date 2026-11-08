@@ -1,8 +1,8 @@
 <script setup>
-import { Download, RotateCcw, Share2, TriangleAlert } from 'lucide-vue-next'
+import { CheckCircle2, Download, RotateCcw, Share2, TriangleAlert } from 'lucide-vue-next'
 import { formatDuration } from '~/core/time'
 import { projectHasAudio } from '~/services/export/audioMix'
-import { getExportSupport, startExport } from '~/services/export/exportClient'
+import { canSaveToFile, getExportSupport, startExport } from '~/services/export/exportClient'
 import { ExportCancelledError } from '~/services/export/types'
 import { canShareFiles, sanitizeFileName, saveFile, shareFile } from '~/services/platform/fileExport'
 import { isNativeApp } from '~/services/platform/platform'
@@ -34,6 +34,11 @@ const quality = ref('high')
 const customMbps = ref(10)
 const audioKbps = ref(192)
 const includeAudio = ref(true)
+/** Stream straight into a file (no size limit) instead of building it in memory. */
+const toFile = ref(false)
+const fileSupported = canSaveToFile()
+/** In-memory exports above this size risk running out of memory. */
+const MEMORY_LIMIT_MB = 1500
 
 const running = ref(false)
 const progress = ref(null)
@@ -99,6 +104,8 @@ watch(
     resolutionScale.value = 1
     includeAudio.value = hasAudio.value
     error.value = null
+    // Long videos are written straight to disk where the browser allows it.
+    toFile.value = fileSupported && projectStore.duration > 180
   },
 )
 
@@ -113,6 +120,27 @@ function reset() {
 async function run() {
   const project = projectStore.project
   if (!project || running.value) return
+  // Ask for the target file first - the picker must open right after the click.
+  let fileHandle = null
+  if (toFile.value && fileSupported) {
+    try {
+      const mp4 = container.value === 'mp4'
+      fileHandle = await window.showSaveFilePicker({
+        suggestedName: `${sanitizeFileName(project.name)}.${container.value}`,
+        types: [{ description: mp4 ? 'MP4 video' : 'WebM video', accept: mp4 ? { 'video/mp4': ['.mp4'] } : { 'video/webm': ['.webm'] } }],
+      })
+    } catch (e) {
+      if (e?.name === 'AbortError') return
+      ui.toast('Could not open the save dialog - exporting into memory instead', 'warning')
+    }
+  } else if (estimatedSize.value > MEMORY_LIMIT_MB) {
+    const ok = await ui.confirm({
+      title: 'Very large export',
+      message: `About ${Math.round(estimatedSize.value)} MB will be built in memory, which may fail on this device. Lower the quality or resolution${fileSupported ? ', or turn on "Save straight to a file"' : ', or use the desktop app / Chrome on a computer'}.`,
+      confirmLabel: 'Export anyway',
+    })
+    if (!ok) return
+  }
   reset()
   running.value = true
   startedAt.value = performance.now()
@@ -124,12 +152,14 @@ async function run() {
     videoBitrate: videoBitrate.value,
     audioBitrate: audioKbps.value * 1000,
     includeAudio: includeAudio.value && hasAudio.value,
+    fileHandle,
   }
   handle = startExport(project, options, (p) => (progress.value = p))
   try {
     const value = await handle.promise
     result.value = value
-    resultUrl.value = URL.createObjectURL(new Blob([value.buffer], { type: value.mimeType }))
+    if (value.buffer) resultUrl.value = URL.createObjectURL(new Blob([value.buffer], { type: value.mimeType }))
+    else ui.toast(`Saved as ${value.savedToFile}`, 'success')
     for (const warning of value.warnings) ui.toast(warning, 'warning', { timeout: 8000 })
   } catch (e) {
     if (e instanceof ExportCancelledError) ui.toast('Export cancelled', 'info')
@@ -201,6 +231,13 @@ const phaseLabel = computed(() => {
     <div v-if="!support.supported" class="flex gap-3 rounded-xl border border-danger/40 bg-danger/10 p-3 text-sm">
       <TriangleAlert class="size-5 shrink-0 text-danger" />
       <p>{{ support.reason }}</p>
+    </div>
+
+    <!-- saved straight to a file -->
+    <div v-else-if="result && result.savedToFile" class="flex flex-col items-center gap-2 py-6 text-center">
+      <CheckCircle2 class="size-10 text-ok" />
+      <p class="text-sm font-semibold">Saved as {{ result.savedToFile }}</p>
+      <p class="text-xs text-muted">{{ result.videoCodec?.toUpperCase() }} · {{ result.audioCodec?.toUpperCase() ?? 'no audio' }} - open it from the folder you chose.</p>
     </div>
 
     <!-- result -->
@@ -299,6 +336,14 @@ const phaseLabel = computed(() => {
         </div>
       </div>
 
+      <div v-if="fileSupported" class="rounded-xl border border-line bg-panel-2/60 px-3 py-2">
+        <UiSwitch v-model="toFile" label="Save straight to a file (best for long videos)" />
+        <p class="text-[11px] text-muted">You pick the file first; the video is written to disk while it renders, so its length is not limited by memory.</p>
+      </div>
+      <p v-else-if="estimatedSize > MEMORY_LIMIT_MB" class="rounded-xl border border-warn/40 bg-warn/10 px-3 py-2 text-[11px] text-warn">
+        This export is built in memory (~{{ Math.round(estimatedSize) }} MB). For long videos lower the quality, or use the desktop app / Chrome on a computer, which can write straight to a file.
+      </p>
+
       <dl class="flex justify-between rounded-xl bg-panel-2 px-3 py-2 text-xs text-muted">
         <div><dt class="inline">Output: </dt><dd class="inline text-fg/80">{{ output.width }}×{{ output.height }} · {{ fps }} fps</dd></div>
         <div><dt class="inline">Length: </dt><dd class="inline text-fg/80">{{ formatDuration(projectStore.duration) }}</dd></div>
@@ -309,6 +354,10 @@ const phaseLabel = computed(() => {
     <template #footer>
       <template v-if="running">
         <UiButton variant="danger" @click="cancel">Cancel export</UiButton>
+      </template>
+      <template v-else-if="result && result.savedToFile">
+        <UiButton variant="ghost" :icon="RotateCcw" @click="reset">Export again</UiButton>
+        <UiButton variant="primary" @click="close">Done</UiButton>
       </template>
       <template v-else-if="result">
         <UiButton variant="ghost" :icon="RotateCcw" @click="reset">Export again</UiButton>

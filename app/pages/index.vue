@@ -45,8 +45,10 @@ function openProject(id) {
 async function onCreate(options) {
   createOpen.value = false
   try {
-    const project = createProject(options.name, { width: options.width, height: options.height, fps: options.fps })
-    await projectRepository.save(project)
+    const project = await projectRepository.create(
+      createProject(options.name, { width: options.width, height: options.height, fps: options.fps }),
+    )
+    if (project.name !== options.name) ui.toast(`"${options.name}" already exists - named it "${project.name}"`, 'info')
     if (pendingFiles.value.length) setPendingImport(pendingFiles.value)
     pendingFiles.value = []
     openProject(project.id)
@@ -58,7 +60,8 @@ async function onCreate(options) {
 async function rename(p) {
   const name = await ui.prompt({ title: 'Rename project', label: 'Name', value: p.name, confirmLabel: 'Rename' })
   if (!name?.trim()) return
-  await projectRepository.rename(p.id, name.trim())
+  const used = await projectRepository.rename(p.id, name.trim())
+  if (used && used !== name.trim()) ui.toast(`That name is taken - renamed to "${used}"`, 'info')
   await refresh()
 }
 

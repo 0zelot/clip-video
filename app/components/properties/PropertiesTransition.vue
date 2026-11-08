@@ -1,13 +1,15 @@
 <script setup>
-import { Shuffle } from 'lucide-vue-next'
+import { CopyCheck, Shuffle } from 'lucide-vue-next'
 import { DEFAULT_TRANSITION_DURATION, TRANSITIONS } from '~/core/model/defaults'
 import { hasPreviousNeighbour } from '~/core/operations/items'
+import { useUiStore } from '~/stores/ui'
 import { useEditorStore } from '~/stores/editor'
 import { useProjectStore } from '~/stores/project'
 
 const props = defineProps({ item: { type: Object, required: true } })
 const projectStore = useProjectStore()
 const editor = useEditorStore()
+const ui = useUiStore()
 
 const joined = computed(() => (projectStore.project ? hasPreviousNeighbour(projectStore.project, props.item.id) : false))
 const transition = computed(() => props.item.transitionIn ?? { kind: 'none', duration: DEFAULT_TRANSITION_DURATION })
@@ -31,6 +33,21 @@ function setDirection(direction) {
   projectStore.setTransition(props.item.id, { ...transition.value, direction })
   editor.engine?.refresh()
 }
+
+/** Uses this transition between every pair of touching clips on the track. */
+function applyToTrack() {
+  const count = projectStore.applyTransitionToTrack(props.item.id, transition.value)
+  ui.toast(count ? `Transition applied to ${count} cut${count === 1 ? '' : 's'}` : 'No touching clips on this track', count ? 'success' : 'info')
+  editor.engine?.refresh()
+}
+
+/** Seeks just before the cut and plays it. */
+function previewTransition() {
+  const start = Math.max(0, props.item.start - 0.6)
+  editor.engine?.pause()
+  editor.engine?.seek(start)
+  editor.engine?.play()
+}
 </script>
 
 <template>
@@ -39,7 +56,7 @@ function setDirection(direction) {
       Put this clip directly after another one on the same track to blend them.
     </p>
     <template v-else>
-      <div class="grid grid-cols-4 gap-1">
+      <div class="grid grid-cols-4 gap-1 sm:grid-cols-4">
         <button
           v-for="option in TRANSITIONS"
           :key="option.id"
@@ -71,6 +88,10 @@ function setDirection(direction) {
             <option value="down">From the top</option>
           </select>
         </label>
+      </div>
+      <div class="flex gap-1.5">
+        <UiButton size="sm" class="flex-1" :disabled="transition.kind === 'none'" @click="previewTransition">Preview</UiButton>
+        <UiButton size="sm" class="flex-1" :icon="CopyCheck" @click="applyToTrack">Apply to all cuts</UiButton>
       </div>
     </template>
   </PropertiesSection>
