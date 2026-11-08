@@ -37,7 +37,7 @@ below) and double-click it. Nothing to install:
 | --- | --- | --- |
 | Windows | `Clip-<version>-windows-portable.exe` | Double-click. (Windows SmartScreen may warn about an unknown app: *More info* → *Run anyway*.) |
 | Linux | `Clip-<version>-linux-x86_64.AppImage` | Right-click → *Properties* → *Allow executing as program*, then double-click. Or in a terminal: `chmod +x Clip-*.AppImage && ./Clip-*.AppImage` |
-| macOS | `Clip-<version>-mac-<arch>.zip` | Unzip, then right-click `Clip.app` → *Open* (the first time only, because the app is not signed). |
+| macOS | `Clip-<version>-mac-arm64.zip` (Apple M1 and newer) or `-mac-x64.zip` (Intel) | Unzip and move `Clip.app` to *Applications*. The app is not signed with an Apple certificate, so the first time macOS refuses it ("damaged" or "cannot be opened") - run `xattr -cr /Applications/Clip.app` in *Terminal* once, then open it normally. |
 | Android | `app-debug.apk` | Copy it to the phone, open it and allow installing from this source. |
 | Browser | - | Open the hosted web version (any static hosting, see below). |
 
@@ -416,12 +416,17 @@ npm run desktop:dev
 
 Build double-clickable files (they appear in **`dist-desktop/`**):
 
-| Command | Produces | Build it on |
-| --- | --- | --- |
-| `npm run build:desktop` | the right file for the computer you are on | any |
-| `npm run build:desktop:win` | `Clip-<version>-windows-portable.exe` - one file, just run it | Windows or Linux |
-| `npm run build:desktop:linux` | `Clip-<version>-linux-x86_64.AppImage` - one file, just run it | Linux |
-| `npm run build:desktop:mac` | `Clip-<version>-mac-<arch>.zip` with `Clip.app` | macOS only (Apple's rule) |
+| Command | Produces |
+| --- | --- |
+| `npm run build:desktop` | the right file for the computer you are on |
+| `npm run build:desktop:win` | `Clip-<version>-windows-portable.exe` - one file, just run it |
+| `npm run build:desktop:linux` | `Clip-<version>-linux-x86_64.AppImage` - one file, just run it |
+| `npm run build:desktop:mac` | `Clip-<version>-mac-arm64.zip` and `Clip-<version>-mac-x64.zip` with `Clip.app` |
+
+Every command works on Windows, Linux and macOS. Two things electron-builder cannot do on every system are handled by
+the build script itself: on Windows it packs the AppImage with a built-in SquashFS writer (the usual `mksquashfs` tool
+does not exist for Windows), and outside macOS it assembles `Clip.app` from the official Electron build. The macOS app
+is unsigned either way, exactly as electron-builder would make it on a Mac without an Apple developer certificate.
 
 The desktop app is the same editor in its own window (Electron). It needs no internet and no server: the files are
 served from inside the app. Your projects are stored in the app's own data folder:
@@ -468,7 +473,8 @@ connected over USB (developer mode on) you can also run `npm run android`.
 npm run build:all
 ```
 
-Builds the website (`.output/public`), the desktop apps for Linux and Windows (`dist-desktop/`) and the Android APK.
+Builds the website (`.output/public`), the desktop apps for Windows, Linux and macOS (`dist-desktop/`) and the Android
+APK.
 
 ### 6. Tests
 
@@ -490,7 +496,7 @@ Runs the unit tests of the editing core (timeline operations, speed ramps, keyfr
 | `npm run build:desktop[:win\|:linux\|:mac]` | Portable desktop app(s) in `dist-desktop/` |
 | `npm run build:android` | Android debug APK |
 | `npm run android` | Build and run on a connected Android device |
-| `npm run build:all` | Website + Linux + Windows + Android |
+| `npm run build:all` | Website + Windows + Linux + macOS + Android |
 | `npm test` | Unit tests |
 
 ---
